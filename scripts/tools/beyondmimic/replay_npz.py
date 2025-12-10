@@ -42,7 +42,7 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 ##
 # Pre-defined configs
 ##
-from robot_lab.assets.unitree import UNITREE_G1_29DOF_CFG
+from robot_lab.assets.unitree import UNITREE_G1_29DOF_CFG, UNITREE_G1_23DOF_CFG
 from robot_lab.tasks.manager_based.beyondmimic.mdp import MotionLoader
 
 
@@ -61,7 +61,7 @@ class ReplayMotionsSceneCfg(InteractiveSceneCfg):
     )
 
     # articulation
-    robot: ArticulationCfg = UNITREE_G1_29DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = UNITREE_G1_23DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):

@@ -16,7 +16,7 @@ class UnitreeG1MotionTrackingFlatEnvCfg(MotionTrackingEnvCfg):
 
         self.scene.robot = UNITREE_G1_23DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.actions.joint_pos.scale = UNITREE_G1_23DOF_ACTION_SCALE
-        self.commands.motion.motion_file = f"{os.path.dirname(__file__)}/motion/0000_treadmill_norm_poses.npz"
+        self.commands.motion.motion_folder = f"{os.path.dirname(__file__)}/motion"
         # self.commands.motion.motion_file = f"{os.path.dirname(__file__)}/motion/G1_gangnam_style_V01.bvh_60hz.npz"
         self.commands.motion.anchor_body_name = "torso_link"
         self.commands.motion.body_names = [
@@ -35,8 +35,5 @@ class UnitreeG1MotionTrackingFlatEnvCfg(MotionTrackingEnvCfg):
             "right_elbow_link",
             "right_wrist_roll_rubber_hand",
         ]
-
-        self.observations.policy.motion_anchor_pos_b = None
-        self.observations.policy.base_lin_vel = None
 
         self.episode_length_s = 30.0

@@ -114,17 +114,19 @@ class ObservationsCfg:
     """Observation specifications for the MDP."""
 
     @configclass
-    class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
+    class FutureMotionCfg(ObsGroup):
+        motion_body_pos_w = ObsTerm(func=mdp.motion_body_pos_w, params={"command_name": "motion", "future_steps": 32}, noise=Unoise(n_min=-0.02, n_max=0.02))
+        motion_body_ori_w = ObsTerm(func=mdp.motion_body_ori_w, params={"command_name": "motion", "future_steps": 32}, noise=Unoise(n_min=-0.02, n_max=0.02))
+        motion_body_lin_vel_w = ObsTerm(func=mdp.motion_body_lin_vel_w, params={"command_name": "motion", "future_steps": 32}, noise=Unoise(n_min=-0.02, n_max=0.02))
+        motion_body_ang_vel_w = ObsTerm(func=mdp.motion_body_ang_vel_w, params={"command_name": "motion", "future_steps": 32}, noise=Unoise(n_min=-0.02, n_max=0.02))
+        motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 32}, noise=Unoise(n_min=-0.02, n_max=0.02))
+        motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 32}, noise=Unoise(n_min=-0.02, n_max=0.02))
+        def __post_init__(self):
+            self.enable_corruption = True 
+            self.concatenate_terms = True   # [num_envs, future_steps, future_motion_dim]
 
-        # observation terms (order preserved)
-        command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
-        motion_anchor_pos_b = ObsTerm(
-            func=mdp.motion_anchor_pos_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.25, n_max=0.25)
-        )
-        motion_anchor_ori_b = ObsTerm(
-            func=mdp.motion_anchor_ori_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.05, n_max=0.05)
-        )
+    @configclass
+    class ProprioCfg(ObsGroup):
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.5, n_max=0.5))
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
@@ -133,24 +135,24 @@ class ObservationsCfg:
 
         def __post_init__(self):
             self.enable_corruption = True
-            self.concatenate_terms = True
+            self.concatenate_terms = True   # [num_envs, proprio_dim]   
 
-    @configclass
-    class CriticCfg(ObsGroup):
-        command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
-        motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"})
-        motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"})
-        body_pos = ObsTerm(func=mdp.robot_body_pos_b, params={"command_name": "motion"})
-        body_ori = ObsTerm(func=mdp.robot_body_ori_b, params={"command_name": "motion"})
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
-        actions = ObsTerm(func=mdp.last_action)
+    # @configclass
+    # class ProprioHistoryCfg(ObsGroup):
+    #     proprio_history = ObsTerm(
+    #         func=mdp.proprioception_history,
+    #         params={"history_length": 8},
+    #         noise=Unoise(n_min=-0.01, n_max=0.01),
+    #     )
+
+    #     def __post_init__(self):
+    #         self.enable_corruption = True
+    #         self.concatenate_terms = True   # [num_envs, history_length, proprio_dim]
 
     # observation groups
-    policy: PolicyCfg = PolicyCfg()
-    critic: CriticCfg = CriticCfg()
+    future_motion: FutureMotionCfg = FutureMotionCfg()
+    proprio : ProprioCfg  = ProprioCfg()
+    # proprio_history : ProprioHistoryCfg  = ProprioHistoryCfg()
 
 
 @configclass
