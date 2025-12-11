@@ -82,7 +82,7 @@ def motion_future_frames(env: ManagerBasedEnv, command_name: str, future_steps: 
     command: MotionCommand = env.command_manager.get_term(command_name)
     current_frame = command.current_frame
     motion_start = command.motion.motion_start[command.env_motion_idx]
-    motion_lengths = command.motion_frames[command.env_motion_idx]
+    motion_lengths = command.motion.motion_frames[command.env_motion_idx]
     offsets = torch.arange(future_steps, device=env.device)
     future_frames = torch.minimum(current_frame.unsqueeze(-1) + offsets.unsqueeze(0), motion_start.unsqueeze(-1) + motion_lengths.unsqueeze(-1) - 1)
     return future_frames    # [num_envs, future_steps]
@@ -110,7 +110,7 @@ def motion_body_ori_w(env: ManagerBasedEnv, command_name: str, future_steps: int
     body_index = command.body_indexes
     motion_body_quat_w = command.motion.motion_body_quat_w[:, body_index][future_frames]
     mat = matrix_from_quat(motion_body_quat_w.view(-1, 4))[..., :2]
-    return mat.reshape(mat.shape[0], future_steps, -1)
+    return mat.reshape(motion_body_quat_w.shape[0], future_steps, -1)
 
 # global motion every link linear velocities  [num_envs, future_steps, num_bodies*3]
 def motion_body_lin_vel_w(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:

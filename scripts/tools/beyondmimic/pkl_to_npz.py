@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-    使用配置文件是23dof三个腰的g1机器人
-    python pkl_to_npz.py -f path_to_input.pkl --input_fps 60
+    使用配置文件是23dof单个腰的g1机器人
+    python scripts/tools/beyondmimic/pkl_to_npz.py -f path_to_input.pkl --input_fps 60
 """
 
 import argparse

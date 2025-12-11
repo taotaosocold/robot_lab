@@ -106,9 +106,9 @@ class MotionCommand(CommandTerm):
         self.metrics["error_body_rot"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_vel"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["sampling_entropy"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
+        # self.metrics["bin_sampling_entropy"] = torch.zeros(self.num_envs, device=self.device)
+        # self.metrics["bin_sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
+        # self.metrics["bin_sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
 
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
@@ -226,16 +226,16 @@ class MotionCommand(CommandTerm):
         # adaptive sampling motion
         if torch.any(episode_failed):
             fail_motion = self.env_motion_idx[env_ids][episode_failed]
-            self._current_motion_failed[:] = torch.bincount(fail_motion, minlength=self.num_motions)
+            self._current_motion_failed[:] = torch.bincount(fail_motion, minlength=self.motion.num_motions)
         
-        motion_sampling_probabilities = self.motion_failed_count + self.cfg.motion_adaptive_uniform_ratio / float(self.num_motions)
+        motion_sampling_probabilities = self.motion_failed_count + self.cfg.motion_adaptive_uniform_ratio / float(self.motion.num_motions)
         motion_sampling_probabilities = motion_sampling_probabilities / motion_sampling_probabilities.sum()
         sampled_motion = torch.multinomial(motion_sampling_probabilities, len(env_ids), replacement=True)
 
         # adaptive sampling clip
         if torch.any(episode_failed):
             current_bin_index = torch.clamp(
-                (self.time_steps * self.bin_count) // self.motion_frames[self.env_motion_idx], 0, self.bin_count - 1
+                (self.time_steps * self.bin_count) // self.motion.motion_frames[self.env_motion_idx], 0, self.bin_count - 1
             )       # [num_envs]
             fail_bins = current_bin_index[env_ids][episode_failed]
             self._current_bin_failed[self.env_motion_idx[env_ids][episode_failed], fail_bins] += 1.0
@@ -256,18 +256,19 @@ class MotionCommand(CommandTerm):
 
         motion_lengths = self.motion.motion_frames[self.env_motion_idx[env_ids]]
         start_frames = self.motion.motion_start[self.env_motion_idx[env_ids]]
+
         self.time_steps[env_ids] = (
-            start_frames + (sampled_bins.float() / self.bin_count * motion_lengths).long() + torch.randint(0, 
-                (motion_lengths / self.bin_count).long().clamp(min=1), (len(env_ids),), device=self.device)
+            start_frames + (sampled_bins.float() / self.bin_count * motion_lengths).long() + 
+            (torch.rand(len(env_ids), device=self.device) * (motion_lengths / self.bin_count).long().clamp(min=1)).long()
         ).long()
 
         # Metrics
         H = -(bin_sampling_probabilities * (bin_sampling_probabilities + 1e-12).log()).sum()
         H_norm = H / math.log(self.bin_count)
         pmax, imax = bin_sampling_probabilities.max(dim=0)
-        self.metrics["bin_sampling_entropy"][:] = H_norm
-        self.metrics["bin_sampling_top1_prob"][:] = pmax
-        self.metrics["bin_sampling_top1_bin"][:] = imax.float() / self.bin_count
+        # self.metrics["bin_sampling_entropy"][:] = H_norm[self.env_motion_idx]
+        # self.metrics["bin_sampling_top1_prob"][:] = pmax
+        # self.metrics["bin_sampling_top1_bin"][:] = imax.float() / self.bin_count
 
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
@@ -406,6 +407,8 @@ class MotionCommandCfg(CommandTermCfg):
     adaptive_lambda: float = 0.8
     adaptive_uniform_ratio: float = 0.1
     adaptive_alpha: float = 0.001
+
+    motion_adaptive_uniform_ratio: float = 0.1
 
     anchor_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/pose")
     anchor_visualizer_cfg.markers["frame"].scale = (0.2, 0.2, 0.2)
