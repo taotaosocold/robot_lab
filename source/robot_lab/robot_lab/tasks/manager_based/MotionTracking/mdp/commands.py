@@ -258,7 +258,7 @@ class MotionCommand(CommandTerm):
         start_frames = self.motion.motion_start[self.env_motion_idx[env_ids]]
 
         self.time_steps[env_ids] = (
-            start_frames + (sampled_bins.float() / self.bin_count * motion_lengths).long() + 
+            (sampled_bins.float() / self.bin_count * motion_lengths).long() + 
             (torch.rand(len(env_ids), device=self.device) * (motion_lengths / self.bin_count).long().clamp(min=1)).long()
         ).long()
 

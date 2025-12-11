@@ -1,21 +1,23 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+    # Copyright (c) 2024-2025 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 """
-    使用配置文件是23dof单个腰的g1机器人
-    python scripts/tools/beyondmimic/pkl_to_npz.py -f path_to_input.pkl --input_fps 60
+    python scripts/tools/beyondmimic/batch_pkl_to_npz.py --input_dir path/to/pkls --output_dir path/to/save_npzs --headless
 """
 
 import argparse
 import numpy as np
 import sys
+import os
+import glob
 from isaaclab.app import AppLauncher
 import joblib
 import pickle
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Replay motion from pkl file and output to npz file.")
-parser.add_argument("--input_file", "-f", type=str, required=True, help="The path to the input motion pkl file.")
+parser = argparse.ArgumentParser(description="Batch replay motion from pkl files and output to npz files.")
+parser.add_argument("--input_dir", type=str, required=True, help="The directory containing input motion pkl files.")
+parser.add_argument("--output_dir", type=str, required=True, help="The directory to save output motion npz files.")
 parser.add_argument("--input_fps", type=int, default=60, help="The fps of the input motion.")
 parser.add_argument(
     "--frame_range",
@@ -27,19 +29,14 @@ parser.add_argument(
         " loaded."
     ),
 )
-parser.add_argument("--output_name", type=str, help="The name of the motion npz file.")
 parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
-# parse the arguments
 args_cli = parser.parse_args()
-if not args_cli.output_name:
-    # generate at the same location as input file
-    args_cli.output_name = (
-        "/".join(args_cli.input_file.split("/")[:-1]) + "/" + args_cli.input_file.split("/")[-1].replace(".pkl", ".npz")
-    )
 
+# Ensure output directory exists
+os.makedirs(args_cli.output_dir, exist_ok=True)
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -57,9 +54,6 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp
 
-##
-# Pre-defined configs
-##
 from robot_lab.assets.unitree import UNITREE_G1_29DOF_CFG, UNITREE_G1_23DOF_CFG
 
 
@@ -111,6 +105,7 @@ class MotionLoader:
             from numpy.core import multiarray
             sys.modules['numpy._core.multiarray'] = multiarray
         
+        print(f"[INFO] Loading motion file: {self.motion_file}")
         with open(self.motion_file, 'rb') as f:
             motion = pickle.load(f)
             motion['root_pos'] = torch.from_numpy(motion['root_pos'])
@@ -125,12 +120,13 @@ class MotionLoader:
 
         self.motion_base_poss_input = motion['root_pos'].float().to(self.device)
         self.motion_base_rots_input = motion['root_rot'].float().to(self.device)
+        # Check if quaternion needs wxyz conversion (assuming input is xyzw usually unless specified otherwise, 
+        # but your original code did explicit shuffle [3, 0, 1, 2] which means input was xyzw)
         self.motion_base_rots_input = self.motion_base_rots_input[:, [3, 0, 1, 2]].float().to(self.device)  # convert to wxyz
         self.motion_dof_poss_input = motion['dof_pos'].float().to(self.device)
 
         self.input_frames = self.motion_base_poss_input.shape[0]
         self.duration = (self.input_frames - 1) * self.input_dt
-        print(f"Motion loaded ({self.motion_file}), duration: {self.duration} sec, frames: {self.input_frames}")
 
     def _interpolate_motion(self):
         """Interpolates the motion to the output fps."""
@@ -151,10 +147,6 @@ class MotionLoader:
             self.motion_dof_poss_input[index_0],
             self.motion_dof_poss_input[index_1],
             blend.unsqueeze(1),
-        )
-        print(
-            f"Motion interpolated, input frames: {self.input_frames}, input fps: {self.input_fps}, output frames:"
-            f" {self.output_frames}, output fps: {self.output_fps}"
         )
 
     def _lerp(self, a: torch.Tensor, b: torch.Tensor, blend: torch.Tensor) -> torch.Tensor:
@@ -183,31 +175,15 @@ class MotionLoader:
         self.motion_base_ang_vels = self._so3_derivative(self.motion_base_rots, self.output_dt)
 
     def _so3_derivative(self, rotations: torch.Tensor, dt: float) -> torch.Tensor:
-        """Computes the derivative of a sequence of SO3 rotations.
-
-        Args:
-            rotations: shape (B, 4).
-            dt: time step.
-        Returns:
-            shape (B, 3).
-        """
+        """Computes the derivative of a sequence of SO3 rotations."""
         q_prev, q_next = rotations[:-2], rotations[2:]
-        q_rel = quat_mul(q_next, quat_conjugate(q_prev))  # shape (B−2, 4)
+        q_rel = quat_mul(q_next, quat_conjugate(q_prev))  # shape (B-2, 4)
 
-        omega = axis_angle_from_quat(q_rel) / (2.0 * dt)  # shape (B−2, 3)
+        omega = axis_angle_from_quat(q_rel) / (2.0 * dt)  # shape (B-2, 3)
         omega = torch.cat([omega[:1], omega, omega[-1:]], dim=0)  # repeat first and last sample
         return omega
 
-    def get_next_state(
-        self,
-    ) -> tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-    ]:
+    def get_next_state(self) -> tuple[tuple, bool]:
         """Gets the next state of the motion."""
         state = (
             self.motion_base_poss[self.current_idx : self.current_idx + 1],
@@ -226,17 +202,17 @@ class MotionLoader:
 
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
-    """Runs the simulation loop."""
-    # Load motion
-    motion = MotionLoader(
-        motion_file=args_cli.input_file,
-        input_fps=args_cli.input_fps,
-        output_fps=args_cli.output_fps,
-        device=sim.device,
-        frame_range=args_cli.frame_range,
-    )
+    """Runs the simulation loop for all files in input directory."""
+    
+    # 1. Get all pkl files
+    pkl_files = sorted(glob.glob(os.path.join(args_cli.input_dir, "*.pkl")))
+    if not pkl_files:
+        print(f"[ERROR]: No .pkl files found in {args_cli.input_dir}")
+        return
 
-    # Extract scene entities
+    print(f"[INFO]: Found {len(pkl_files)} files. Starting batch processing...")
+
+    # Extract scene entities (Robot) only once
     robot = scene["robot"]
     joint_sdk_names = [
         "left_hip_pitch_joint",
@@ -271,55 +247,76 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     ]
     robot_joint_indexes = robot.find_joints(joint_sdk_names, preserve_order=True)[0]
 
-    # ------- data logger -------------------------------------------------------
-    log = {
-        "fps": [args_cli.output_fps],
-        "joint_pos": [],
-        "joint_vel": [],
-        "body_pos_w": [],
-        "body_quat_w": [],
-        "body_lin_vel_w": [],
-        "body_ang_vel_w": [],
-    }
-    file_saved = False
-    # --------------------------------------------------------------------------
+    for file_path in pkl_files:
+        if not simulation_app.is_running():
+            break
 
-    # Simulation loop
-    while simulation_app.is_running():
-        (
+        file_name = os.path.basename(file_path)
+        output_name = os.path.join(args_cli.output_dir, file_name.replace(".pkl", ".npz"))
+
+        try:
+            motion = MotionLoader(
+                motion_file=file_path,
+                input_fps=args_cli.input_fps,
+                output_fps=args_cli.output_fps,
+                device=sim.device,
+                frame_range=args_cli.frame_range,
+            )
+        except Exception as e:
+            print(f"[ERROR] Failed to load {file_name}: {e}")
+            continue
+
+        # Initialize data logger for this specific file
+        log = {
+            "fps": [args_cli.output_fps],
+            "joint_pos": [],
+            "joint_vel": [],
+            "body_pos_w": [],
+            "body_quat_w": [],
+            "body_lin_vel_w": [],
+            "body_ang_vel_w": [],
+        }
+        
+        # Inner Loop: Play one motion file
+        processing_file = True
+        while processing_file and simulation_app.is_running():
             (
-                motion_base_pos,
-                motion_base_rot,
-                motion_base_lin_vel,
-                motion_base_ang_vel,
-                motion_dof_pos,
-                motion_dof_vel,
-            ),
-            reset_flag,
-        ) = motion.get_next_state()
+                (
+                    motion_base_pos,
+                    motion_base_rot,
+                    motion_base_lin_vel,
+                    motion_base_ang_vel,
+                    motion_dof_pos,
+                    motion_dof_vel,
+                ),
+                reset_flag,
+            ) = motion.get_next_state()
 
-        # set root state
-        root_states = robot.data.default_root_state.clone()
-        root_states[:, :3] = motion_base_pos
-        root_states[:, :2] += scene.env_origins[:, :2]
-        root_states[:, 3:7] = motion_base_rot
-        root_states[:, 7:10] = motion_base_lin_vel
-        root_states[:, 10:] = motion_base_ang_vel
-        robot.write_root_state_to_sim(root_states)
+            # set root state
+            root_states = robot.data.default_root_state.clone()
+            root_states[:, :3] = motion_base_pos
+            root_states[:, :2] += scene.env_origins[:, :2]
+            root_states[:, 3:7] = motion_base_rot
+            root_states[:, 7:10] = motion_base_lin_vel
+            root_states[:, 10:] = motion_base_ang_vel
+            robot.write_root_state_to_sim(root_states)
 
-        # set joint state
-        joint_pos = robot.data.default_joint_pos.clone()
-        joint_vel = robot.data.default_joint_vel.clone()
-        joint_pos[:, robot_joint_indexes] = motion_dof_pos
-        joint_vel[:, robot_joint_indexes] = motion_dof_vel
-        robot.write_joint_state_to_sim(joint_pos, joint_vel)
-        sim.render()  # We don't want physic (sim.step())
-        scene.update(sim.get_physics_dt())
+            # set joint state
+            joint_pos = robot.data.default_joint_pos.clone()
+            joint_vel = robot.data.default_joint_vel.clone()
+            joint_pos[:, robot_joint_indexes] = motion_dof_pos
+            joint_vel[:, robot_joint_indexes] = motion_dof_vel
+            robot.write_joint_state_to_sim(joint_pos, joint_vel)
+            
+            # Step simulation / Render
+            sim.render() 
+            scene.update(sim.get_physics_dt())
 
-        pos_lookat = root_states[0, :3].cpu().numpy()
-        sim.set_camera_view(pos_lookat + np.array([2.0, 2.0, 0.5]), pos_lookat)
+            # Update camera (Optional visual aid)
+            pos_lookat = root_states[0, :3].cpu().numpy()
+            sim.set_camera_view(pos_lookat + np.array([2.0, 2.0, 0.5]), pos_lookat)
 
-        if not file_saved:
+            # Log data
             log["joint_pos"].append(robot.data.joint_pos[0, :].cpu().numpy().copy())
             log["joint_vel"].append(robot.data.joint_vel[0, :].cpu().numpy().copy())
             log["body_pos_w"].append(robot.data.body_pos_w[0, :].cpu().numpy().copy())
@@ -327,21 +324,26 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             log["body_lin_vel_w"].append(robot.data.body_lin_vel_w[0, :].cpu().numpy().copy())
             log["body_ang_vel_w"].append(robot.data.body_ang_vel_w[0, :].cpu().numpy().copy())
 
-        if reset_flag and not file_saved:
-            file_saved = True
-            for k in (
-                "joint_pos",
-                "joint_vel",
-                "body_pos_w",
-                "body_quat_w",
-                "body_lin_vel_w",
-                "body_ang_vel_w",
-            ):
-                log[k] = np.stack(log[k], axis=0)
+            # Check for completion
+            if reset_flag:
+                # Save data
+                for k in (
+                    "joint_pos",
+                    "joint_vel",
+                    "body_pos_w",
+                    "body_quat_w",
+                    "body_lin_vel_w",
+                    "body_ang_vel_w",
+                ):
+                    log[k] = np.stack(log[k], axis=0)
 
-            np.savez(args_cli.output_name, **log)
-            print("[INFO]: Motion npz file saved to", args_cli.output_name)
+                np.savez(output_name, **log)
+                print(f"[SUCCESS]: Saved {output_name}")
+                
+                # Break inner loop to move to next file
+                processing_file = False 
 
+    print("[INFO]: All files processed.")
 
 def main():
     """Main function."""
