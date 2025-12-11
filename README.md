@@ -246,6 +246,29 @@ BeyondMimic for Unitree G1:
   python scripts/reinforcement_learning/rsl_rl/play.py --task=RobotLab-Isaac-BeyondMimic-Flat-Unitree-G1-v0 --num_envs 2
   ```
 
+MotionTracking for Unitree G1
+- Convert single retargeted motion(GMR retargeting with .pkl) to coordinates information via forward kinematics
+
+  ```bash
+  python scripts/tools/beyondmimic/pkl_to_npz.py -f path_to_input.pkl --input_fps 60 --headless
+  ```
+
+- Conver a batch retargeted motions(GMR retargeting with .pkl) to coordinates information via forward kinematics
+
+  ```bash
+  python scripts/tools/beyondmimic/batch_pkl_to_npz.py --input_dir path/to/pkls --output_dir path/to/save_npzs --headless
+  ```
+
+- Training and Evaluation
+
+  ```bash
+  # Train
+  python scripts/reinforcement_learning/rsl_rl/train.py --task=RobotLab-Isaac-MotionTracking-Flat-Unitree-G1-v0 --headless
+
+  # Play
+  python scripts/reinforcement_learning/rsl_rl/play.py --task=RobotLab-Isaac-MotionTracking-Flat-Unitree-G1-v0 --num_envs 2
+  ```
+
 Others (**Experimental**)
 
 - Train AMP Dance for Unitree G1
