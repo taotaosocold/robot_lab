@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-    python scripts/tools/beyondmimic/batch_pkl_to_npz.py --input_dir path/to/pkls --output_dir path/to/save_npzs --headless
+    python scripts/tools/beyondmimic/batch_pkl_to_npz.py --input_dir path/to/pkls --output_dir path/to/save_npzs --input_fps 60 --headless
 """
 
 import argparse

@@ -256,7 +256,7 @@ MotionTracking for Unitree G1
 - Conver a batch retargeted motions(GMR retargeting with .pkl) to coordinates information via forward kinematics
 
   ```bash
-  python scripts/tools/beyondmimic/batch_pkl_to_npz.py --input_dir path/to/pkls --output_dir path/to/save_npzs --headless
+  python scripts/tools/beyondmimic/batch_pkl_to_npz.py --input_dir path/to/pkls --output_dir path/to/save_npzs --input_fps 60 --headless
   ```
 
 - Training and Evaluation
