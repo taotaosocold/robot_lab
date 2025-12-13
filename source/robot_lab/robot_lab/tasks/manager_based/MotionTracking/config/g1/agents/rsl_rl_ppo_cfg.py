@@ -43,3 +43,6 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+    # eval
+    load_run = "2025-12-11_16-36-00"
+    load_checkpoint = "model_500.pt"
