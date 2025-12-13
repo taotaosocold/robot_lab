@@ -266,7 +266,7 @@ MotionTracking for Unitree G1
   python scripts/reinforcement_learning/rsl_rl/train.py --task=RobotLab-Isaac-MotionTracking-Flat-Unitree-G1-v0 --headless
 
   # Play
-  python scripts/reinforcement_learning/rsl_rl/play.py --task=RobotLab-Isaac-MotionTracking-Flat-Unitree-G1-v0 --num_envs 2
+  python scripts/reinforcement_learning/rsl_rl/play_MT.py --task=RobotLab-Isaac-MotionTracking-Flat-Unitree-G1-v0 --num_envs 2
   ```
 
 Others (**Experimental**)
