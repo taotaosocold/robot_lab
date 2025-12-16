@@ -159,7 +159,8 @@ class TransformerEncoderDecoderActorCritic(nn.Module):
 
     def update_normalization(self, obs: TensorDict) -> None:
         if "future_motion" in obs:
-            self.motion_future_norm.update(obs["future_motion"])
+            future_motion = obs["future_motion"].view(-1, fm.shape[-1])
+            self.motion_future_norm.update(future_motion)
         if "proprio" in obs:
             self.proprio_norm.update(obs["proprio"])
 
