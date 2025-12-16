@@ -104,6 +104,7 @@ class TransformerEncoderDecoderActorCritic(nn.Module):
         # Actor 最后一层初始化为接近 0
         nn.init.constant_(self.actor_head[-1].weight, 0.01)
         nn.init.constant_(self.actor_head[-1].bias, 0.0)
+
     def _forward_transformer(self, observations: TensorDict):
         future_motion = observations["future_motion"] # (B, future_steps, future_dim)
         proprio = observations["proprio"]             # (B, proprio_dim)
@@ -159,7 +160,8 @@ class TransformerEncoderDecoderActorCritic(nn.Module):
 
     def update_normalization(self, obs: TensorDict) -> None:
         if "future_motion" in obs:
-            future_motion = obs["future_motion"].view(-1, fm.shape[-1])
+            future_motion = obs["future_motion"]
+            future_motion = future_motion.view(-1, future_motion.shape[-1])
             self.motion_future_norm.update(future_motion)
         if "proprio" in obs:
             self.proprio_norm.update(obs["proprio"])
