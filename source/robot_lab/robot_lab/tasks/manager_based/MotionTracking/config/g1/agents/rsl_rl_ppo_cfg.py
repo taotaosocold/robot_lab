@@ -22,7 +22,7 @@ class TransformerActorCriticCfg:
 class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 30000
-    save_interval = 500
+    save_interval = 100
     experiment_name = "unitree_g1_MotionTracking_flat"
     obs_groups = {
         "policy": ["proprio", "future_motion"],

@@ -52,7 +52,7 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp
+from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp, quat_apply
 
 from robot_lab.assets.unitree import UNITREE_G1_29DOF_CFG, UNITREE_G1_23DOF_CFG
 
@@ -275,6 +275,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             "body_quat_w": [],
             "body_lin_vel_w": [],
             "body_ang_vel_w": [],
+            "body_pos_r": [],
+            "body_quat_r": [],
+            "body_lin_vel_r": [],
+            "body_ang_vel_r": [],
         }
         
         # Inner Loop: Play one motion file
@@ -317,12 +321,30 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             sim.set_camera_view(pos_lookat + np.array([2.0, 2.0, 0.5]), pos_lookat)
 
             # Log data
+            body_pos_w = robot.data.body_pos_w[0]   # [num_envs, num_bodies, data_dim], but num envs = 1
+            body_quat_w = robot.data.body_quat_w[0]
+            body_lin_vel_w = robot.data.body_lin_vel_w[0]
+            body_ang_vel_w = robot.data.body_ang_vel_w[0]
+            root_pos_w = body_pos_w[0].clone()
+            root_quat_w = body_quat_w[0].clone()
+            num_bodies = body_pos_w.shape[0]
+            root_quat_inv = quat_conjugate(root_quat_w.unsqueeze(0).repeat(num_bodies, 1))
+            body_pos_r = body_pos_w - root_pos_w
+            body_pos_r = quat_apply(root_quat_inv, body_pos_r)
+            body_quat_r= quat_mul(root_quat_inv, body_quat_w)
+            body_lin_vel_r = quat_apply(root_quat_inv, body_lin_vel_w)
+            body_ang_vel_r = quat_apply(root_quat_inv, body_ang_vel_w)
+
             log["joint_pos"].append(robot.data.joint_pos[0, :].cpu().numpy().copy())
             log["joint_vel"].append(robot.data.joint_vel[0, :].cpu().numpy().copy())
-            log["body_pos_w"].append(robot.data.body_pos_w[0, :].cpu().numpy().copy())
-            log["body_quat_w"].append(robot.data.body_quat_w[0, :].cpu().numpy().copy())
-            log["body_lin_vel_w"].append(robot.data.body_lin_vel_w[0, :].cpu().numpy().copy())
-            log["body_ang_vel_w"].append(robot.data.body_ang_vel_w[0, :].cpu().numpy().copy())
+            log["body_pos_w"].append(body_pos_w.cpu().numpy().copy())
+            log["body_quat_w"].append(body_quat_w.cpu().numpy().copy())
+            log["body_lin_vel_w"].append(body_lin_vel_w.cpu().numpy().copy())
+            log["body_ang_vel_w"].append(body_ang_vel_w.cpu().numpy().copy())
+            log["body_pos_r"].append(body_pos_r.cpu().numpy().copy())
+            log["body_quat_r"].append(body_quat_r.cpu().numpy().copy())
+            log["body_lin_vel_r"].append(body_lin_vel_r.cpu().numpy().copy())
+            log["body_ang_vel_r"].append(body_ang_vel_r.cpu().numpy().copy())
 
             # Check for completion
             if reset_flag:
@@ -334,6 +356,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     "body_quat_w",
                     "body_lin_vel_w",
                     "body_ang_vel_w",
+                    "body_pos_r",
+                    "body_quat_r",
+                    "body_lin_vel_r",
+                    "body_ang_vel_r",
                 ):
                     log[k] = np.stack(log[k], axis=0)
 

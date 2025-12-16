@@ -47,6 +47,10 @@ class MotionLoader:
         motion_body_quat_w = []
         motion_body_lin_vel_w = []
         motion_body_ang_vel_w = []
+        motion_body_pos_r = []
+        motion_body_quat_r = []
+        motion_body_lin_vel_r = []
+        motion_body_ang_vel_r = []
         motion_frames = []
         for i, file_path in enumerate(self.motion_files):
             data = np.load(file_path)
@@ -57,6 +61,10 @@ class MotionLoader:
             motion_body_quat_w.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=self.device))
             motion_body_lin_vel_w.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=self.device))
             motion_body_ang_vel_w.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=self.device))
+            motion_body_pos_r.append(torch.tensor(data["body_pos_r"], dtype=torch.float32, device=self.device))
+            motion_body_quat_r.append(torch.tensor(data["body_quat_r"], dtype=torch.float32, device=self.device))
+            motion_body_lin_vel_r.append(torch.tensor(data["body_lin_vel_r"], dtype=torch.float32, device=self.device))
+            motion_body_ang_vel_r.append(torch.tensor(data["body_ang_vel_r"], dtype=torch.float32, device=self.device))
             motion_frames.append(data["joint_pos"].shape[0])
         
         self.motion_joint_pos = torch.cat(motion_joint_pos, dim=0)  # [total_frames, 23]
@@ -65,6 +73,10 @@ class MotionLoader:
         self.motion_body_quat_w = torch.cat(motion_body_quat_w, dim=0)
         self.motion_body_lin_vel_w = torch.cat(motion_body_lin_vel_w, dim=0)
         self.motion_body_ang_vel_w = torch.cat(motion_body_ang_vel_w, dim=0)
+        self.motion_body_pos_r = torch.cat(motion_body_pos_r, dim=0)
+        self.motion_body_quat_r = torch.cat(motion_body_quat_r, dim=0)
+        self.motion_body_lin_vel_r = torch.cat(motion_body_lin_vel_r, dim=0)
+        self.motion_body_ang_vel_r = torch.cat(motion_body_ang_vel_r, dim=0)
         self.motion_frames = torch.tensor(motion_frames, dtype=torch.long, device=self.device) #[20, 30...]
         self.motion_start = torch.cat([torch.zeros(1, dtype=torch.long, device=self.device), self.motion_frames.cumsum(dim=0)[:-1]]) #[0, 20, 50...]
 
@@ -87,6 +99,8 @@ class MotionCommand(CommandTerm):
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
         self.body_quat_relative_w[:, :, 0] = 1.0
+        self.body_lin_vel_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
+        self.body_ang_vel_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.motion_failed_count = torch.zeros(self.motion.num_motions, dtype=torch.float, device=self.device)
         self._current_motion_failed = torch.zeros(self.motion.num_motions, dtype=torch.float, device=self.device)
         # 直接每个运动序列分成的片段数量相同（舍弃每个运动序列动态片段）
@@ -157,6 +171,38 @@ class MotionCommand(CommandTerm):
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
         return self.motion.motion_body_ang_vel_w[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
+
+    @property
+    def body_pos_r(self) -> torch.Tensor:
+        return self.motion.motion_body_pos_r[self.current_frame][:, self.motion._body_indexes]
+
+    @property
+    def body_quat_r(self) -> torch.Tensor:
+        return self.motion.motion_body_quat_r[self.current_frame][:, self.motion._body_indexes]
+
+    @property
+    def body_lin_vel_r(self) -> torch.Tensor:
+        return self.motion.motion_body_lin_vel_r[self.current_frame][:, self.motion._body_indexes]
+
+    @property
+    def body_ang_vel_r(self) -> torch.Tensor:
+        return self.motion.motion_body_ang_vel_r[self.current_frame][:, self.motion._body_indexes]
+
+    @property
+    def anchor_pos_r(self) -> torch.Tensor:
+        return self.motion.motion_body_pos_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index] + self._env.scene.env_origins
+
+    @property
+    def anchor_quat_r(self) -> torch.Tensor:
+        return self.motion.motion_body_quat_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
+
+    @property
+    def anchor_lin_vel_r(self) -> torch.Tensor:
+        return self.motion.motion_body_lin_vel_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
+
+    @property
+    def anchor_ang_vel_r(self) -> torch.Tensor:
+        return self.motion.motion_body_ang_vel_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
 
     @property
     def robot_joint_pos(self) -> torch.Tensor:
@@ -322,7 +368,8 @@ class MotionCommand(CommandTerm):
 
         self.body_quat_relative_w = quat_mul(delta_ori_w, self.body_quat_w)
         self.body_pos_relative_w = delta_pos_w + quat_apply(delta_ori_w, self.body_pos_w - anchor_pos_w_repeat)
-
+        self.body_lin_vel_relative_w = quat_apply(delta_ori_w, self.body_lin_vel_w)
+        self.body_ang_vel_relative_w = quat_apply(delta_ori_w, self.body_ang_vel_w)
         # update motion and bin
         self.motion_failed_count = (
             self.cfg.adaptive_alpha * self._current_motion_failed +

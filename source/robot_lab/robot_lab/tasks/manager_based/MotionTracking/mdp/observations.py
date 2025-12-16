@@ -141,29 +141,107 @@ def motion_anchor_pos_w(env: ManagerBasedEnv, command_name: str, future_steps: i
 def motion_anchor_ori_w(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     future_frames = motion_future_frames(env, command_name, future_steps)
-    body_index = command._body_indexes
+    body_index = command.body_indexes
     anchor_index = command.motion_anchor_body_index
-    motion_anchor_quat_w = command.motion.motion_body_quat_w[:, body_index][:, :anchor_index][future_frames]
-    mat = matrix_from_quat(motion_body_quat_w.view(-1, 4))[..., :2]
+    motion_anchor_quat_w = command.motion.motion_body_quat_w[:, body_index][:, anchor_index][future_frames]
+    mat = matrix_from_quat(motion_anchor_quat_w.view(-1, 4))[..., :2]
     return mat.reshape(mat.shape[0], future_steps, -1)
 
 # global motion root linear velocity [num_envs, future_steps, 3]
 def motion_anchor_lin_vel_w(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     future_frames = motion_future_frames(env, command_name, future_steps)
-    body_index = command._body_indexes
+    body_index = command.body_indexes
     anchor_index = command.motion_anchor_body_index
-    motion_anchor_lin_vel_w = command.motion.motion_body_lin_vel_w[:, body_index][:, :anchor_index][future_frames]
+    motion_anchor_lin_vel_w = command.motion.motion_body_lin_vel_w[:, body_index][:, anchor_index][future_frames]
     return motion_anchor_lin_vel_w.view(env.num_envs, future_steps, -1)
 
 # global motion root angular velocity [num_envs, future_steps, 3]
 def motion_anchor_ang_vel_w(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     future_frames = motion_future_frames(env, command_name, future_steps)
-    body_index = command._body_indexes
+    body_index = command.body_indexes
     anchor_index = command.motion_anchor_body_index
     motion_anchor_ang_vel_w = command.motion.motion_body_ang_vel_w[:, body_index][:, anchor_index][future_frames]
     return motion_anchor_ang_vel_w.view(env.num_envs, future_steps, -1)
+
+# relative motion every link positions  [num_envs, future_steps, num_bodies*3]
+def motion_body_pos_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    motion_body_pos_r = command.motion.motion_body_pos_r[:, body_index][future_frames]
+    return motion_body_pos_r.view(env.num_envs, future_steps, -1)
+
+# relative motion every link orientations(quat)  [num_envs, future_steps, num_bodies*4]
+def motion_body_quat_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    motion_body_quat_r = command.motion.motion_body_quat_r[:, body_index][future_frames]
+    return motion_body_quat_r.view(env.num_envs, future_steps, -1)
+
+# relative motion every link orientations(6D)  [num_envs, future_steps, num_bodies*6]
+def motion_body_ori_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    motion_body_quat_r = command.motion.motion_body_quat_r[:, body_index][future_frames]
+    mat = matrix_from_quat(motion_body_quat_r.view(-1, 4))[..., :2]
+    return mat.reshape(motion_body_quat_r.shape[0], future_steps, -1)
+
+# relative motion every link linear velocities  [num_envs, future_steps, num_bodies*3]
+def motion_body_lin_vel_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    motion_body_lin_vel_r = command.motion.motion_body_lin_vel_r[:, body_index][future_frames]
+    return motion_body_lin_vel_r.view(env.num_envs, future_steps, -1)
+
+# relative motion every link angular velocities  [num_envs, future_steps, num_bodies*3]
+def motion_body_ang_vel_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    motion_body_ang_vel_r = command.motion.motion_body_ang_vel_r[:, body_index][future_frames]
+    return motion_body_ang_vel_r.view(env.num_envs, future_steps, -1)
+
+# relative motion root position [num_envs, future_steps, 3]
+def motion_anchor_pos_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    anchor_index = command.motion_anchor_body_index
+    motion_anchor_pos_r = command.motion.motion_body_pos_r[:, body_index][:, anchor_index][future_frames]
+    return motion_anchor_pos_r.view(env.num_envs, future_steps, -1)
+
+# relative motion root orientation [num_envs, future_steps, 6]
+def motion_anchor_ori_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    anchor_index = command.motion_anchor_body_index
+    motion_anchor_quat_r = command.motion.motion_body_quat_r[:, body_index][:, anchor_index][future_frames]
+    mat = matrix_from_quat(motion_anchor_quat_r.view(-1, 4))[..., :2]
+    return mat.reshape(mat.shape[0], future_steps, -1)
+
+# relative motion root linear velocity [num_envs, future_steps, 3]
+def motion_anchor_lin_vel_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    anchor_index = command.motion_anchor_body_index
+    motion_anchor_lin_vel_r = command.motion.motion_body_lin_vel_r[:, body_index][:, anchor_index][future_frames]
+    return motion_anchor_lin_vel_r.view(env.num_envs, future_steps, -1)
+
+# relative motion root angular velocity [num_envs, future_steps, 3]
+def motion_anchor_ang_vel_r(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    body_index = command.body_indexes
+    anchor_index = command.motion_anchor_body_index
+    motion_anchor_ang_vel_r = command.motion.motion_body_ang_vel_r[:, body_index][:, anchor_index][future_frames]
+    return motion_anchor_ang_vel_r.view(env.num_envs, future_steps, -1)
 
 # motion joint positions [num_envs, future_steps, num_joints]
 def motion_joint_pos(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:

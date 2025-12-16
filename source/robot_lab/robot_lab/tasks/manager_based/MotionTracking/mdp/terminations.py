@@ -15,7 +15,6 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 
 from robot_lab.tasks.manager_based.beyondmimic.mdp.commands import MotionCommand
-from robot_lab.tasks.manager_based.beyondmimic.mdp.rewards import _get_body_indexes
 
 
 def bad_anchor_pos(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:
@@ -40,14 +39,21 @@ def bad_anchor_ori(
 
     return (motion_projected_gravity_b[:, 2] - robot_projected_gravity_b[:, 2]).abs() > threshold
 
+def bad_anchor_gravity(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str, threshold: float
+) -> torch.Tensor:
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]   
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    robot_projected_gravity_b = math_utils.quat_apply_inverse(command.robot_anchor_quat_w, asset.data.GRAVITY_VEC_W)
+    
+    return robot_projected_gravity_b[:, 2].abs() < threshold
 
 def bad_motion_body_pos(
     env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str] | None = None
 ) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
 
-    body_indexes = _get_body_indexes(command, body_names)
-    error = torch.norm(command.body_pos_relative_w[:, body_indexes] - command.robot_body_pos_w[:, body_indexes], dim=-1)
+    error = torch.norm(command.body_pos_w - command.robot_body_pos_w, dim=-1)
     return torch.any(error > threshold, dim=-1)
 
 
@@ -56,6 +62,6 @@ def bad_motion_body_pos_z_only(
 ) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
 
-    body_indexes = _get_body_indexes(command, body_names)
-    error = torch.abs(command.body_pos_relative_w[:, body_indexes, -1] - command.robot_body_pos_w[:, body_indexes, -1])
+    error = torch.abs(command.body_pos_w[:, :, -1] - command.robot_body_pos_w[:, :, -1])
     return torch.any(error > threshold, dim=-1)
+
