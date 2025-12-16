@@ -115,22 +115,22 @@ class ObservationsCfg:
 
     @configclass
     class FutureMotionCfg(ObsGroup):
-        motion_body_pos_r = ObsTerm(func=mdp.motion_body_pos_r, params={"command_name": "motion", "future_steps": 32}, scale=1.0)
-        motion_body_ori_r = ObsTerm(func=mdp.motion_body_ori_r, params={"command_name": "motion", "future_steps": 32}, scale=1.0)
-        motion_body_lin_vel_r = ObsTerm(func=mdp.motion_body_lin_vel_r, params={"command_name": "motion", "future_steps": 32}, scale=0.05)
-        motion_body_ang_vel_r = ObsTerm(func=mdp.motion_body_ang_vel_r, params={"command_name": "motion", "future_steps": 32}, scale=0.01)
-        motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 32}, scale=0.3)
-        motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 32}, scale=0.01)
+        motion_body_pos_r = ObsTerm(func=mdp.motion_body_pos_r, params={"command_name": "motion", "future_steps": 32})
+        motion_body_ori_r = ObsTerm(func=mdp.motion_body_ori_r, params={"command_name": "motion", "future_steps": 32})
+        motion_body_lin_vel_r = ObsTerm(func=mdp.motion_body_lin_vel_r, params={"command_name": "motion", "future_steps": 32})
+        motion_body_ang_vel_r = ObsTerm(func=mdp.motion_body_ang_vel_r, params={"command_name": "motion", "future_steps": 32})
+        motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 32})
+        motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 32})
         def __post_init__(self):
             self.enable_corruption = True 
             self.concatenate_terms = True   # [num_envs, future_steps, future_motion_dim]
 
     @configclass
     class ProprioCfg(ObsGroup):
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.4, n_max=0.4), scale=0.05)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.7, n_max=0.7), scale=0.01)
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01), scale=0.3)
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-3.5, n_max=3.5), scale=0.01)
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.4, n_max=0.4))
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.7, n_max=0.7))
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-3.5, n_max=3.5))
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
