@@ -6,17 +6,25 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 from .Transformer_ActorCritic import TransformerEncoderDecoderActorCritic
 
 @configclass
-class TransformerActorCriticCfg:
+class TransformerEncoderDecoderActorCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['TransformerEncoderDecoderActorCritic']).TransformerEncoderDecoderActorCritic"
     d_model: int = 512
     nhead: int = 4
     num_encoder_layers: int = 2
     num_decoder_layers: int = 2
     dim_feedforward: int = 1024
-    dropout: float = 0.1    
-    init_noise_std: float = 1.0
+    dropout: float = 0.0    
+    init_noise_std: float = 0.2
 
-
+@configclass
+class TransformerEncoderActorCriticCfg:
+    class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['TransformerEncoderActorCritic']).TransformerEncoderActorCritic"
+    d_model: int = 256
+    nhead: int = 4
+    num_encoder_layers: int = 4
+    dim_feedforward: int = 1024
+    dropout: float = 0.0
+    init_noise_std: float = 0.2
 
 @configclass
 class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
@@ -28,7 +36,7 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         "policy": ["proprio", "future_motion"],
         "critic": ["proprio", "future_motion"],
     }
-    policy = TransformerActorCriticCfg()
+    policy = TransformerEncoderActorCriticCfg()
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
@@ -36,7 +44,7 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         entropy_coef=0.005,
         num_learning_epochs=5,
         num_mini_batches=32,
-        learning_rate=1.0e-3,
+        learning_rate=1.0e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
