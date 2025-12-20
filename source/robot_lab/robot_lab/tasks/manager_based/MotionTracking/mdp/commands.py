@@ -37,7 +37,6 @@ class MotionLoader:
         self.num_motions = len(self.motion_files)
         self.device = device
         self.load_motion()
-        self._body_indexes = body_indexes
 
     def load_motion(self):
         motion_fps = []
@@ -47,10 +46,6 @@ class MotionLoader:
         motion_body_quat_w = []
         motion_body_lin_vel_w = []
         motion_body_ang_vel_w = []
-        motion_body_pos_r = []
-        motion_body_quat_r = []
-        motion_body_lin_vel_r = []
-        motion_body_ang_vel_r = []
         motion_frames = []
         for i, file_path in enumerate(self.motion_files):
             data = np.load(file_path)
@@ -61,10 +56,6 @@ class MotionLoader:
             motion_body_quat_w.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=self.device))
             motion_body_lin_vel_w.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=self.device))
             motion_body_ang_vel_w.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=self.device))
-            motion_body_pos_r.append(torch.tensor(data["body_pos_r"], dtype=torch.float32, device=self.device))
-            motion_body_quat_r.append(torch.tensor(data["body_quat_r"], dtype=torch.float32, device=self.device))
-            motion_body_lin_vel_r.append(torch.tensor(data["body_lin_vel_r"], dtype=torch.float32, device=self.device))
-            motion_body_ang_vel_r.append(torch.tensor(data["body_ang_vel_r"], dtype=torch.float32, device=self.device))
             motion_frames.append(data["joint_pos"].shape[0])
         
         self.motion_joint_pos = torch.cat(motion_joint_pos, dim=0)  # [total_frames, 23]
@@ -73,10 +64,6 @@ class MotionLoader:
         self.motion_body_quat_w = torch.cat(motion_body_quat_w, dim=0)
         self.motion_body_lin_vel_w = torch.cat(motion_body_lin_vel_w, dim=0)
         self.motion_body_ang_vel_w = torch.cat(motion_body_ang_vel_w, dim=0)
-        self.motion_body_pos_r = torch.cat(motion_body_pos_r, dim=0)
-        self.motion_body_quat_r = torch.cat(motion_body_quat_r, dim=0)
-        self.motion_body_lin_vel_r = torch.cat(motion_body_lin_vel_r, dim=0)
-        self.motion_body_ang_vel_r = torch.cat(motion_body_ang_vel_r, dim=0)
         self.motion_frames = torch.tensor(motion_frames, dtype=torch.long, device=self.device) #[20, 30...]
         self.motion_start = torch.cat([torch.zeros(1, dtype=torch.long, device=self.device), self.motion_frames.cumsum(dim=0)[:-1]]) #[0, 20, 50...]
 
@@ -142,67 +129,35 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_pos_w(self) -> torch.Tensor:
-        return self.motion.motion_body_pos_w[self.current_frame][:, self.motion._body_indexes] + self._env.scene.env_origins[:, None, :]
+        return self.motion.motion_body_pos_w[self.current_frame][:, self.body_indexes] + self._env.scene.env_origins[:, None, :]
 
     @property
     def body_quat_w(self) -> torch.Tensor:
-        return self.motion.motion_body_quat_w[self.current_frame][:, self.motion._body_indexes]
+        return self.motion.motion_body_quat_w[self.current_frame][:, self.body_indexes]
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.motion_body_lin_vel_w[self.current_frame][:, self.motion._body_indexes]
+        return self.motion.motion_body_lin_vel_w[self.current_frame][:, self.body_indexes]
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.motion_body_ang_vel_w[self.current_frame][:, self.motion._body_indexes]
+        return self.motion.motion_body_ang_vel_w[self.current_frame][:, self.body_indexes]
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
-        return self.motion.motion_body_pos_w[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index] + self._env.scene.env_origins
+        return self.motion.motion_body_pos_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index] + self._env.scene.env_origins
 
     @property
     def anchor_quat_w(self) -> torch.Tensor:
-        return self.motion.motion_body_quat_w[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
+        return self.motion.motion_body_quat_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index]
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.motion_body_lin_vel_w[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
+        return self.motion.motion_body_lin_vel_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index]
 
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.motion_body_ang_vel_w[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
-
-    @property
-    def body_pos_r(self) -> torch.Tensor:
-        return self.motion.motion_body_pos_r[self.current_frame][:, self.motion._body_indexes]
-
-    @property
-    def body_quat_r(self) -> torch.Tensor:
-        return self.motion.motion_body_quat_r[self.current_frame][:, self.motion._body_indexes]
-
-    @property
-    def body_lin_vel_r(self) -> torch.Tensor:
-        return self.motion.motion_body_lin_vel_r[self.current_frame][:, self.motion._body_indexes]
-
-    @property
-    def body_ang_vel_r(self) -> torch.Tensor:
-        return self.motion.motion_body_ang_vel_r[self.current_frame][:, self.motion._body_indexes]
-
-    @property
-    def anchor_pos_r(self) -> torch.Tensor:
-        return self.motion.motion_body_pos_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index] + self._env.scene.env_origins
-
-    @property
-    def anchor_quat_r(self) -> torch.Tensor:
-        return self.motion.motion_body_quat_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
-
-    @property
-    def anchor_lin_vel_r(self) -> torch.Tensor:
-        return self.motion.motion_body_lin_vel_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
-
-    @property
-    def anchor_ang_vel_r(self) -> torch.Tensor:
-        return self.motion.motion_body_ang_vel_r[self.current_frame][:, self.motion._body_indexes][:, self.motion_anchor_body_index]
+        return self.motion.motion_body_ang_vel_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index]
 
     @property
     def robot_joint_pos(self) -> torch.Tensor:

@@ -138,22 +138,25 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True   # [num_envs, proprio_dim]   
 
-    # @configclass
-    # class ProprioHistoryCfg(ObsGroup):
-    #     proprio_history = ObsTerm(
-    #         func=mdp.proprioception_history,
-    #         params={"history_length": 8},
-    #         noise=Unoise(n_min=-0.01, n_max=0.01),
-    #     )
+    @configclass
+    class ProprioHistoryCfg(ObsGroup):
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.4, n_max=0.4))
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.7, n_max=0.7))
+        projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.2, n_max=0.2))
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-3.5, n_max=3.5))
+        actions = ObsTerm(func=mdp.last_action)
 
-    #     def __post_init__(self):
-    #         self.enable_corruption = True
-    #         self.concatenate_terms = True   # [num_envs, history_length, proprio_dim]
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True   # [num_envs, history_length, proprio_dim]
+            self.flatten_history_dim = False
+            self.history_length = 11
 
     # observation groups
     future_motion: FutureMotionCfg = FutureMotionCfg()
     proprio : ProprioCfg  = ProprioCfg()
-    # proprio_history : ProprioHistoryCfg  = ProprioHistoryCfg()
+    proprio_history : ProprioHistoryCfg  = ProprioHistoryCfg()
 
 
 @configclass
@@ -216,24 +219,24 @@ class RewardsCfg:
     )
 
     # Tracking
-    motion_joint_pos = RewTerm(
-        func=mdp.motion_joint_position_error_exp,
-        weight=3.0,
+    motion_global_anchor_pos = RewTerm(
+        func=mdp.motion_global_anchor_position_error_exp,
+        weight=0.5,
         params={"command_name": "motion", "std": 0.3},
     )
-    motion_joint_vel = RewTerm(
-        func=mdp.motion_joint_velocity_error_exp,
+    motion_global_anchor_ori = RewTerm(
+        func=mdp.motion_global_anchor_orientation_error_exp,
         weight=0.5,
-        params={"command_name": "motion", "std": 1.0},
+        params={"command_name": "motion", "std": 0.4},
     )
     motion_relative_body_pos = RewTerm(
         func=mdp.motion_relative_body_position_error_exp,
-        weight=0.5,
+        weight=1.0,
         params={"command_name": "motion", "std": 0.3},
     )
     motion_relative_body_ori = RewTerm(
         func=mdp.motion_relative_body_orientation_error_exp,
-        weight=0.5,
+        weight=1.0,
         params={"command_name": "motion", "std": 0.4},
     )
     motion_relative_body_lin_vel = RewTerm(

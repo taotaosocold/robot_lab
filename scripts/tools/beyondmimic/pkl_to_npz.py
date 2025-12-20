@@ -3,7 +3,7 @@
 
 """
     使用配置文件是23dof单个腰的g1机器人
-    python scripts/tools/beyondmimic/pkl_to_npz.py -f path_to_input.pkl --input_fps 60
+    python scripts/tools/beyondmimic/pkl_to_npz.py -f path_to_input.pkl --input_fps 30
 """
 
 import argparse
@@ -55,7 +55,7 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp, quat_apply
+from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp, quat_apply, euler_xyz_from_quat, quat_from_euler_xyz
 
 ##
 # Pre-defined configs
@@ -331,13 +331,16 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             body_ang_vel_w = robot.data.body_ang_vel_w[0]
             root_pos_w = body_pos_w[0].clone()
             root_quat_w = body_quat_w[0].clone()
+            roll, pitch, yaw = euler_xyz_from_quat(root_quat_w.unsqueeze(0))
+            zeros = torch.zeros_like(yaw)
+            heading_quat = quat_from_euler_xyz(zeros, zeros, yaw)
             num_bodies = body_pos_w.shape[0]
-            root_quat_inv = quat_conjugate(root_quat_w.unsqueeze(0).repeat(num_bodies, 1))
+            root_heading_inv = quat_conjugate(heading_quat).repeat(num_bodies, 1)
             body_pos_r = body_pos_w - root_pos_w
-            body_pos_r = quat_apply(root_quat_inv, body_pos_r)
-            body_quat_r= quat_mul(root_quat_inv, body_quat_w)
-            body_lin_vel_r = quat_apply(root_quat_inv, body_lin_vel_w)
-            body_ang_vel_r = quat_apply(root_quat_inv, body_ang_vel_w)
+            body_pos_r = quat_apply(root_heading_inv, body_pos_r)
+            body_quat_r = quat_mul(root_heading_inv, body_quat_w)
+            body_lin_vel_r = quat_apply(root_heading_inv, body_lin_vel_w)
+            body_ang_vel_r = quat_apply(root_heading_inv, body_ang_vel_w)
 
             log["joint_pos"].append(robot.data.joint_pos[0, :].cpu().numpy().copy())
             log["joint_vel"].append(robot.data.joint_vel[0, :].cpu().numpy().copy())
@@ -345,10 +348,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             log["body_quat_w"].append(body_quat_w.cpu().numpy().copy())
             log["body_lin_vel_w"].append(body_lin_vel_w.cpu().numpy().copy())
             log["body_ang_vel_w"].append(body_ang_vel_w.cpu().numpy().copy())
-            log["body_pos_r"].append(body_pos_r.cpu().numpy().copy())
-            log["body_quat_r"].append(body_quat_r.cpu().numpy().copy())
-            log["body_lin_vel_r"].append(body_lin_vel_r.cpu().numpy().copy())
-            log["body_ang_vel_r"].append(body_ang_vel_r.cpu().numpy().copy())
 
         if reset_flag and not file_saved:
             file_saved = True
@@ -359,10 +358,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 "body_quat_w",
                 "body_lin_vel_w",
                 "body_ang_vel_w",
-                "body_pos_r",
-                "body_quat_r",
-                "body_lin_vel_r",
-                "body_ang_vel_r",
             ):
                 log[k] = np.stack(log[k], axis=0)
 

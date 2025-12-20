@@ -52,7 +52,7 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp, quat_apply
+from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp, quat_apply, euler_xyz_from_quat, quat_from_euler_xyz
 
 from robot_lab.assets.unitree import UNITREE_G1_29DOF_CFG, UNITREE_G1_23DOF_CFG
 
@@ -328,12 +328,15 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             root_pos_w = body_pos_w[0].clone()
             root_quat_w = body_quat_w[0].clone()
             num_bodies = body_pos_w.shape[0]
-            root_quat_inv = quat_conjugate(root_quat_w.unsqueeze(0).repeat(num_bodies, 1))
+            roll, pitch, yaw = euler_xyz_from_quat(root_quat_w.unsqueeze(0))
+            zeros = torch.zeros_like(yaw)
+            heading_quat = quat_from_euler_xyz(zeros, zeros, yaw)
+            root_heading_inv = quat_conjugate(heading_quat).repeat(num_bodies, 1)
             body_pos_r = body_pos_w - root_pos_w
-            body_pos_r = quat_apply(root_quat_inv, body_pos_r)
-            body_quat_r= quat_mul(root_quat_inv, body_quat_w)
-            body_lin_vel_r = quat_apply(root_quat_inv, body_lin_vel_w)
-            body_ang_vel_r = quat_apply(root_quat_inv, body_ang_vel_w)
+            body_pos_r = quat_apply(root_heading_inv, body_pos_r)
+            body_quat_r = quat_mul(root_heading_inv, body_quat_w)
+            body_lin_vel_r = quat_apply(root_heading_inv, body_lin_vel_w)
+            body_ang_vel_r = quat_apply(root_heading_inv, body_ang_vel_w)
 
             log["joint_pos"].append(robot.data.joint_pos[0, :].cpu().numpy().copy())
             log["joint_vel"].append(robot.data.joint_vel[0, :].cpu().numpy().copy())
