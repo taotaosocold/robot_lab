@@ -12,7 +12,8 @@ from isaaclab.utils.math import (
     quat_apply,
     quat_mul,
     euler_xyz_from_quat,
-    quat_from_euler_xyz
+    quat_from_euler_xyz,
+    subtract_frame_transforms
 )
 
 from robot_lab.tasks.manager_based.beyondmimic.mdp.commands import MotionCommand
@@ -57,7 +58,7 @@ def robot_joint_vel(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     return command.robot_joint_vel.view(env.num_envs, -1)
 
 # current relative robot every link positions  [num_envs, num_bodies*3]
-def robot_body_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+def robot_body_pos_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
 
     num_bodies = len(command.cfg.body_names)
@@ -71,7 +72,7 @@ def robot_body_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     return pos_b.view(env.num_envs, -1)
 
 # current relative robot every link orientation [num_envs, num_bodies*6]
-def robot_body_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+def robot_body_ori_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
 
     num_bodies = len(command.cfg.body_names)
@@ -307,3 +308,25 @@ def motion_joint_vel(env: ManagerBasedEnv, command_name: str, future_steps: int)
     future_frames = motion_future_frames(env, command_name, future_steps)
     motion_joint_vel = command.motion.motion_joint_vel[future_frames]
     return motion_joint_vel.view(env.num_envs, future_steps, -1)
+
+##########################gain robot and motion diff obs##########################
+def motion_anchor_pos_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    pos, _ = subtract_frame_transforms(
+        command.robot_anchor_pos_w,
+        command.robot_anchor_quat_w,
+        command.anchor_pos_w,
+        command.anchor_quat_w,
+    )
+    return pos.view(env.num_envs, -1)
+
+def motion_anchor_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    _, ori = subtract_frame_transforms(
+        command.robot_anchor_pos_w,
+        command.robot_anchor_quat_w,
+        command.anchor_pos_w,
+        command.anchor_quat_w,
+    )
+    mat = matrix_from_quat(ori)
+    return mat[..., :2].reshape(mat.shape[0], -1)

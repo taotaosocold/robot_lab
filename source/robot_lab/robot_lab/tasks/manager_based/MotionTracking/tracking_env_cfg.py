@@ -115,12 +115,12 @@ class ObservationsCfg:
 
     @configclass
     class FutureMotionCfg(ObsGroup):
-        motion_body_pos_r = ObsTerm(func=mdp.motion_body_pos_r, params={"command_name": "motion", "future_steps": 30})
-        motion_body_ori_r = ObsTerm(func=mdp.motion_body_ori_r, params={"command_name": "motion", "future_steps": 30})
-        motion_body_lin_vel_r = ObsTerm(func=mdp.motion_body_lin_vel_r, params={"command_name": "motion", "future_steps": 30})
-        motion_body_ang_vel_r = ObsTerm(func=mdp.motion_body_ang_vel_r, params={"command_name": "motion", "future_steps": 30})
-        motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 30})
-        motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 30})
+        motion_body_pos_r = ObsTerm(func=mdp.motion_body_pos_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_ori_r = ObsTerm(func=mdp.motion_body_ori_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_lin_vel_r = ObsTerm(func=mdp.motion_body_lin_vel_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_ang_vel_r = ObsTerm(func=mdp.motion_body_ang_vel_r, params={"command_name": "motion", "future_steps": 35})
+        motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 35})
+        motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 35})
         def __post_init__(self):
             self.enable_corruption = True 
             self.concatenate_terms = True   # [num_envs, future_steps, future_motion_dim]
@@ -129,6 +129,8 @@ class ObservationsCfg:
     class ProprioCfg(ObsGroup):
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.4, n_max=0.4))
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.7, n_max=0.7))
+        motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.25, n_max=0.25))
+        motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.05, n_max=0.05))
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.2, n_max=0.2))
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-3.5, n_max=3.5))
@@ -142,6 +144,10 @@ class ObservationsCfg:
     class ProprioHistoryCfg(ObsGroup):
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.4, n_max=0.4))
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.7, n_max=0.7))
+        motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.25, n_max=0.25))
+        motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.05, n_max=0.05))
+        robot_body_pos_r = ObsTerm(func=mdp.robot_body_pos_r, params={"command_name": "motion"})
+        robot_body_ori_r = ObsTerm(func=mdp.robot_body_ori_r, params={"command_name": "motion"})
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.2, n_max=0.2))
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-3.5, n_max=3.5))
@@ -151,7 +157,7 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True   # [num_envs, history_length, proprio_dim]
             self.flatten_history_dim = False
-            self.history_length = 11
+            self.history_length = 6
 
     # observation groups
     future_motion: FutureMotionCfg = FutureMotionCfg()

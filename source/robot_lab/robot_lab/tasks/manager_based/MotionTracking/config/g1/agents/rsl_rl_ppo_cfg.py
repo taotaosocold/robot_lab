@@ -21,18 +21,18 @@ class TransformerEncoderActorCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['TransformerEncoderActorCritic']).TransformerEncoderActorCritic"
     d_model: int = 128
     nhead: int = 2
-    num_encoder_layers: int = 6
-    dim_feedforward: int = 512
+    num_encoder_layers: int = 4
+    dim_feedforward: int = 256
     dropout: float = 0.0
     init_noise_std: float = 0.2
 
 @configclass
 class TransformerEncoderMLPActorCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['TransformerEncoderMLPActorCritic']).TransformerEncoderMLPActorCritic"
-    d_model: int = 256
-    nhead: int = 4
-    num_encoder_layers: int = 4
-    dim_feedforward: int = 1024
+    d_model: int = 128
+    nhead: int = 1
+    num_encoder_layers: int = 2
+    dim_feedforward: int = 128
     mlp_hidden_dims: list[int] = [512, 256, 128]
     activation: str = "elu"
     dropout: float = 0.0
@@ -64,5 +64,5 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         max_grad_norm=1.0,
     )
     # eval
-    load_run = "2025-12-19_18-10-18"
-    load_checkpoint = "model_1600.pt"
+    load_run = "2025-12-22_17-55-45"
+    load_checkpoint = "model_2300.pt"

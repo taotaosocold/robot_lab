@@ -369,14 +369,14 @@ class TransformerEncoderMLPActorCritic(nn.Module):
         obs: TensorDict,
         obs_groups: dict[str, list[str]],
         num_actions: int,
-        d_model: int = 256, 
-        nhead: int = 4,
-        num_encoder_layers: int = 2,
-        dim_feedforward: int = 1024,
-        dropout: float = 0.0,
-        init_noise_std: float = 1.0,
-        mlp_hidden_dims: list[int] = [512, 256, 128], 
-        activation: str = "elu",
+        d_model: int, 
+        nhead: int,
+        num_encoder_layers: int,
+        dim_feedforward: int,
+        dropout: float,
+        init_noise_std: float,
+        mlp_hidden_dims: list[int], 
+        activation: str,
         **kwargs,
     ):
         super().__init__()
@@ -395,25 +395,23 @@ class TransformerEncoderMLPActorCritic(nn.Module):
         self.pos_encoder = PositionalEncoding(d_model, max_len=self.future_steps)
 
         self.actor_motion_proj = nn.Linear(self.motion_future_dim, d_model)
+        self.proj_activation = nn.GELU()
         actor_transformer_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
-            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
+            dropout=dropout, activation="relu", batch_first=True, norm_first=True
         )
         self.actor_transformer = nn.TransformerEncoder(actor_transformer_layer, num_layers=num_encoder_layers)
-        
-        actor_mlp_input_dim = (self.history_steps * self.proprio_dim) + d_model
-        self.actor_mlp = self._build_mlp(actor_mlp_input_dim, mlp_hidden_dims, num_actions, activation)
-
         self.critic_motion_proj = nn.Linear(self.motion_future_dim, d_model)
         critic_transformer_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
-            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
+            dropout=dropout, activation="relu", batch_first=True, norm_first=True
         )
         self.critic_transformer = nn.TransformerEncoder(critic_transformer_layer, num_layers=num_encoder_layers)
         
-        critic_mlp_input_dim = (self.history_steps * self.proprio_dim) + d_model
-        self.critic_mlp = self._build_mlp(critic_mlp_input_dim, mlp_hidden_dims, 1, activation)
-
+        mlp_input_dim = (self.history_steps * self.proprio_dim) + d_model
+        
+        self.actor_mlp = self._build_mlp(mlp_input_dim, mlp_hidden_dims, num_actions, activation)
+        self.critic_mlp = self._build_mlp(mlp_input_dim, mlp_hidden_dims, 1, activation)
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         
         self.apply(self._init_weights)
@@ -442,17 +440,16 @@ class TransformerEncoderMLPActorCritic(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def _process_inputs(self, observations: TensorDict, 
-                        motion_proj, transformer, norm_proprio=True):
+    def _process_inputs(self, observations: TensorDict, motion_proj, transformer):
         
         future_motion = observations["future_motion"]      # (B, future_steps, motion_dim)
         proprio_history = observations["proprio_history"]  # (B, history_steps, proprio_dim)
 
         future_motion = self.motion_future_norm(future_motion)
-        if norm_proprio:
-            proprio_history = self.proprio_norm(proprio_history)
+        proprio_history = self.proprio_norm(proprio_history)
 
         future_emb = motion_proj(future_motion) # (B, T, d_model)
+        future_emb = self.proj_activation(future_emb)   # (B, T, d_model)
         future_emb = self.pos_encoder(future_emb)
         transformer_out = transformer(future_emb) # (B, T, d_model)
         
@@ -465,11 +462,7 @@ class TransformerEncoderMLPActorCritic(nn.Module):
         return combined
 
     def act(self, observations: TensorDict, **kwargs):
-        combined_input = self._process_inputs(
-            observations, 
-            self.actor_motion_proj, 
-            self.actor_transformer
-        )
+        combined_input = self._process_inputs(observations, self.actor_motion_proj, self.actor_transformer)
         self.action_mean = self.actor_mlp(combined_input)
         self.action_std = self.std.expand_as(self.action_mean)
         
@@ -479,11 +472,7 @@ class TransformerEncoderMLPActorCritic(nn.Module):
         return dist.sample()
 
     def get_value(self, observations: TensorDict) -> torch.Tensor:
-        combined_input = self._process_inputs(
-            observations, 
-            self.critic_motion_proj, 
-            self.critic_transformer
-        )
+        combined_input = self._process_inputs(observations, self.critic_motion_proj, self.critic_transformer)
         return self.critic_mlp(combined_input)
 
     def evaluate(self, observations: TensorDict, **kwargs) -> torch.Tensor:
@@ -495,11 +484,7 @@ class TransformerEncoderMLPActorCritic(nn.Module):
 
     def act_inference(self, observations: TensorDict):
         with torch.no_grad():
-            combined_input = self._process_inputs(
-                observations, 
-                self.actor_motion_proj, 
-                self.actor_transformer
-            )
+            combined_input = self._process_inputs(observations, self.actor_motion_proj, self.actor_transformer)
             return self.actor_mlp(combined_input)
 
     def update_normalization(self, obs: TensorDict) -> None:
