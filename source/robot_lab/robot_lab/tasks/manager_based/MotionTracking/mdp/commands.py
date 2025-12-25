@@ -234,42 +234,46 @@ class MotionCommand(CommandTerm):
         sampled_motion = torch.multinomial(motion_sampling_probabilities, len(env_ids), replacement=True)
 
         # adaptive sampling clip
-        if torch.any(episode_failed):
-            current_bin_index = torch.clamp(
-                (self.time_steps * self.bin_count) // self.motion.motion_frames[self.env_motion_idx], 0, self.bin_count - 1
-            )       # [num_envs]
-            fail_bins = current_bin_index[env_ids][episode_failed]
-            self._current_bin_failed[self.env_motion_idx[env_ids][episode_failed], fail_bins] += 1.0
+        if self.cfg.enable_bin_adaptive_sampling:
+            if torch.any(episode_failed):
+                current_bin_index = torch.clamp(
+                    (self.time_steps * self.bin_count) // self.motion.motion_frames[self.env_motion_idx], 0, self.bin_count - 1
+                )       # [num_envs]
+                fail_bins = current_bin_index[env_ids][episode_failed]
+                self._current_bin_failed[self.env_motion_idx[env_ids][episode_failed], fail_bins] += 1.0
 
-        self.env_motion_idx[env_ids] = sampled_motion
+            self.env_motion_idx[env_ids] = sampled_motion
 
-        bin_sampling_probabilities = self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(self.bin_count)    #[num_motions, bin_count]
-        bin_sampling_probabilities = torch.nn.functional.pad(
-            bin_sampling_probabilities.unsqueeze(1),
-            (0, self.cfg.adaptive_kernel_size - 1),  # Non-causal kernel
-            mode="replicate",
-        )
-        bin_sampling_probabilities = torch.nn.functional.conv1d(bin_sampling_probabilities, self.kernel.view(1, 1, -1)).squeeze(1)  # [num_motions, bin_count]
+            bin_sampling_probabilities = self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(self.bin_count)    #[num_motions, bin_count]
+            bin_sampling_probabilities = torch.nn.functional.pad(
+                bin_sampling_probabilities.unsqueeze(1),
+                (0, self.cfg.adaptive_kernel_size - 1),  # Non-causal kernel
+                mode="replicate",
+            )
+            bin_sampling_probabilities = torch.nn.functional.conv1d(bin_sampling_probabilities, self.kernel.view(1, 1, -1)).squeeze(1)  # [num_motions, bin_count]
 
-        bin_sampling_probabilities = bin_sampling_probabilities / bin_sampling_probabilities.sum(dim=1, keepdim=True)   # [num_motions, bin_count]
+            bin_sampling_probabilities = bin_sampling_probabilities / bin_sampling_probabilities.sum(dim=1, keepdim=True)   # [num_motions, bin_count]
 
-        sampled_bins = torch.multinomial(bin_sampling_probabilities[sampled_motion], 1, replacement=True).squeeze(-1)    # [len(env_ids)]
+            sampled_bins = torch.multinomial(bin_sampling_probabilities[sampled_motion], 1, replacement=True).squeeze(-1)    # [len(env_ids)]
 
-        motion_lengths = self.motion.motion_frames[self.env_motion_idx[env_ids]]
-        start_frames = self.motion.motion_start[self.env_motion_idx[env_ids]]
+            motion_lengths = self.motion.motion_frames[self.env_motion_idx[env_ids]]
+            start_frames = self.motion.motion_start[self.env_motion_idx[env_ids]]
 
-        self.time_steps[env_ids] = (
-            (sampled_bins.float() / self.bin_count * motion_lengths).long() + 
-            (torch.rand(len(env_ids), device=self.device) * (motion_lengths / self.bin_count).long().clamp(min=1)).long()
-        ).long()
+            self.time_steps[env_ids] = (
+                (sampled_bins.float() / self.bin_count * motion_lengths).long() + 
+                (torch.rand(len(env_ids), device=self.device) * (motion_lengths / self.bin_count).long().clamp(min=1)).long()
+            ).long()
 
-        # Metrics
-        H = -(bin_sampling_probabilities * (bin_sampling_probabilities + 1e-12).log()).sum()
-        H_norm = H / math.log(self.bin_count)
-        pmax, imax = bin_sampling_probabilities.max(dim=0)
-        # self.metrics["bin_sampling_entropy"][:] = H_norm[self.env_motion_idx]
-        # self.metrics["bin_sampling_top1_prob"][:] = pmax
-        # self.metrics["bin_sampling_top1_bin"][:] = imax.float() / self.bin_count
+            # Metrics
+            H = -(bin_sampling_probabilities * (bin_sampling_probabilities + 1e-12).log()).sum()
+            H_norm = H / math.log(self.bin_count)
+            pmax, imax = bin_sampling_probabilities.max(dim=0)
+            # self.metrics["bin_sampling_entropy"][:] = H_norm[self.env_motion_idx]
+            # self.metrics["bin_sampling_top1_prob"][:] = pmax
+            # self.metrics["bin_sampling_top1_bin"][:] = imax.float() / self.bin_count
+        else:
+            self.env_motion_idx[env_ids] = sampled_motion
+            self.time_steps[env_ids] = 0
 
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
@@ -402,7 +406,7 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
-
+    enable_bin_adaptive_sampling: bool = False
     bin_count = 5
 
     adaptive_kernel_size: int = 1

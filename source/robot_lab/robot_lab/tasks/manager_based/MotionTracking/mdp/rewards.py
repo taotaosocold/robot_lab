@@ -32,9 +32,9 @@ def motion_global_anchor_linear_velocity_error_exp(env: ManagerBasedRLEnv, comma
     error = torch.sum(torch.square(command.anchor_lin_vel_w - command.robot_anchor_lin_vel_w), dim=-1)
     return torch.exp(-error / std**2)
 
-def motion_global_body_angular_velocity_error_exp(env: ManagerBasedRLEnv, command_name: str, std: float, body_names: list[str] | None = None) -> torch.Tensor:
+def motion_global_anchor_angular_velocity_error_exp(env: ManagerBasedRLEnv, command_name: str, std: float, body_names: list[str] | None = None) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
-    error = torch.sum(torch.square(command.body_ang_vel_w - command.robot_body_ang_vel_w), dim=-1)
+    error = torch.sum(torch.square(command.anchor_ang_vel_w - command.robot_anchor_ang_vel_w), dim=-1)
     return torch.exp(-error.mean(-1) / std**2)
 
 #-----------------------------body global----------------------------

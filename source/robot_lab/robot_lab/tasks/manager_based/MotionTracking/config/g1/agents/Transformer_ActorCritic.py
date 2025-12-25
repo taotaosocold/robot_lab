@@ -181,7 +181,7 @@ class TransformerEncoderDecoderActorCritic(nn.Module):
         for key in groups["policy"]:
             if keyword == "future_motion" in key:
                 return obs[key].shape[1]
-            if keywword == "proprio_history" in key:
+            if keyword == "proprio_history" in key:
                 return obs[key].shape[1]
         return 0
 

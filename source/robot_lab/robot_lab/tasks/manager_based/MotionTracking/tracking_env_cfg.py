@@ -115,10 +115,10 @@ class ObservationsCfg:
 
     @configclass
     class FutureMotionCfg(ObsGroup):
-        motion_body_pos_r = ObsTerm(func=mdp.motion_body_pos_r, params={"command_name": "motion", "future_steps": 35})
-        motion_body_ori_r = ObsTerm(func=mdp.motion_body_ori_r, params={"command_name": "motion", "future_steps": 35})
-        motion_body_lin_vel_r = ObsTerm(func=mdp.motion_body_lin_vel_r, params={"command_name": "motion", "future_steps": 35})
-        motion_body_ang_vel_r = ObsTerm(func=mdp.motion_body_ang_vel_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_pos_r = ObsTerm(func=mdp.motion_body_pos_yaw_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_ori_r = ObsTerm(func=mdp.motion_body_ori_yaw_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_lin_vel_r = ObsTerm(func=mdp.motion_body_lin_vel_yaw_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_ang_vel_r = ObsTerm(func=mdp.motion_body_ang_vel_yaw_r, params={"command_name": "motion", "future_steps": 35})
         motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 35})
         motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 35})
         def __post_init__(self):
@@ -313,7 +313,7 @@ class MotionTrackingEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=2.5)
+    scene: MySceneCfg = MySceneCfg(num_envs=2, env_spacing=2.5)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
