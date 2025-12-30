@@ -91,7 +91,7 @@ def motion_future_frames(env: ManagerBasedEnv, command_name: str, future_steps: 
     current_frame = command.current_frame
     motion_start = command.motion.motion_start[command.env_motion_idx]
     motion_lengths = command.motion.motion_frames[command.env_motion_idx]
-    offsets = torch.arange(future_steps, device=env.device)
+    offsets = torch.arange(1, future_steps + 1, device=env.device)
     future_frames = torch.minimum(current_frame.unsqueeze(-1) + offsets.unsqueeze(0), motion_start.unsqueeze(-1) + motion_lengths.unsqueeze(-1) - 1)
     return future_frames    # [num_envs, future_steps]
 

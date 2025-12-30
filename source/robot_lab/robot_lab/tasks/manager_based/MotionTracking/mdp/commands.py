@@ -40,6 +40,7 @@ class MotionLoader:
 
     def load_motion(self):
         motion_fps = []
+        motion_name = []
         motion_joint_pos = []
         motion_joint_vel = []
         motion_body_pos_w = []
@@ -50,6 +51,7 @@ class MotionLoader:
         for i, file_path in enumerate(self.motion_files):
             data = np.load(file_path)
             motion_fps.append(data["fps"])
+            motion_name.append(os.path.splitext(os.path.basename(file_path))[0])
             motion_joint_pos.append(torch.tensor(data["joint_pos"], dtype=torch.float32, device=self.device))
             motion_joint_vel.append(torch.tensor(data["joint_vel"], dtype=torch.float32, device=self.device))
             motion_body_pos_w.append(torch.tensor(data["body_pos_w"], dtype=torch.float32, device=self.device))
@@ -58,6 +60,7 @@ class MotionLoader:
             motion_body_ang_vel_w.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=self.device))
             motion_frames.append(data["joint_pos"].shape[0])
         
+        self.motion_name = motion_name
         self.motion_joint_pos = torch.cat(motion_joint_pos, dim=0)  # [total_frames, 23]
         self.motion_joint_vel = torch.cat(motion_joint_vel, dim=0)
         self.motion_body_pos_w = torch.cat(motion_body_pos_w, dim=0)    # [total_frames, 27, 3]
@@ -74,6 +77,11 @@ class MotionCommand(CommandTerm):
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
+        for actuator_name, actuator_cfg in self.robot.cfg.actuators.items():
+            print(f"执行器组: {actuator_name}")
+            # stiffness 对应 Kp，damping 对应 Kd
+            print(f"  刚度 (Stiffness): {actuator_cfg.stiffness}")
+            print(f"  阻尼 (Damping): {actuator_cfg.damping}")
         self.robot_anchor_body_index = self.robot.body_names.index(self.cfg.anchor_body_name)
         self.motion_anchor_body_index = self.cfg.body_names.index(self.cfg.anchor_body_name)
         self.body_indexes = torch.tensor(
@@ -112,7 +120,7 @@ class MotionCommand(CommandTerm):
         # self.metrics["bin_sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
 
     @property
-    def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
+    def command(self) -> torch.Tensor:
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
 
     @property
@@ -337,8 +345,28 @@ class MotionCommand(CommandTerm):
         self.bin_failed_count = (
             self.cfg.adaptive_alpha * self._current_bin_failed + (1 - self.cfg.adaptive_alpha) * self.bin_failed_count
         )
+        self._print_motion_stats()
         self._current_motion_failed.zero_()
         self._current_bin_failed.zero_()
+
+    def _print_motion_stats(self):
+        print_interval = 24 * 5
+        
+        if self._env.common_step_counter % print_interval == 0:
+            k = min(10, self.motion.num_motions)
+            top_vals, top_idxs = torch.topk(self.motion_failed_count, k=k)
+            print(f"\n" + "-" * 60)
+            print(f"统计时刻 (Total Steps): {self._env.common_step_counter}")
+            print(f"当前最难训练的 Top {k} 运动序列排行：")
+            print("-" * 60)
+            print(f"{'排名':<4} | {'运动序列名称':<35} | {'失败得分 (EMA)':<10}")
+            print("-" * 60)
+            for i in range(k):
+                name = self.motion.motion_name[top_idxs[i].item()]
+                score = top_vals[i].item()
+                print(f"{i+1:<6} | {name:<35} | {score:<10.4f}")
+            
+            print("-" * 60 + "\n")
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
@@ -406,7 +434,7 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
-    enable_bin_adaptive_sampling: bool = False
+    enable_bin_adaptive_sampling: bool = True
     bin_count = 5
 
     adaptive_kernel_size: int = 1
