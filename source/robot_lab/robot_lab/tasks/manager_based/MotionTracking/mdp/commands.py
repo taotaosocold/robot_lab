@@ -77,11 +77,6 @@ class MotionCommand(CommandTerm):
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
-        for actuator_name, actuator_cfg in self.robot.cfg.actuators.items():
-            print(f"执行器组: {actuator_name}")
-            # stiffness 对应 Kp，damping 对应 Kd
-            print(f"  刚度 (Stiffness): {actuator_cfg.stiffness}")
-            print(f"  阻尼 (Damping): {actuator_cfg.damping}")
         self.robot_anchor_body_index = self.robot.body_names.index(self.cfg.anchor_body_name)
         self.motion_anchor_body_index = self.cfg.body_names.index(self.cfg.anchor_body_name)
         self.body_indexes = torch.tensor(

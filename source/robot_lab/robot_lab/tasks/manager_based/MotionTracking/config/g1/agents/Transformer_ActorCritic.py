@@ -204,19 +204,24 @@ class TransformerEncoderActorCritic(nn.Module):
     ):
         super().__init__()
         self.num_actions = num_actions
-        self.motion_future_dim = self._get_dim(obs, obs_groups, "future_motion")
-        self.proprio_dim = self._get_dim(obs, obs_groups, "proprio_history")
+        self.motion_future_dim = self._get_group_dim(obs, obs_groups, "policy", "future_motion")
+        self.actor_proprio_dim = self._get_group_dim(obs, obs_groups, "policy", "proprio_history")
+        self.critic_proprio_dim = self._get_group_dim(obs, obs_groups, "critic", "proprio_history")
         self.future_steps = self._get_steps(obs, obs_groups, "future_motion")
         self.history_lengths = self._get_steps(obs, obs_groups, "proprio_history")
         self.d_model = d_model
 
+        self.register_buffer("type_0", torch.tensor(0, dtype=torch.long))
+        self.register_buffer("type_1", torch.tensor(1, dtype=torch.long))
+
         self.pos_encoder = PositionalEncoding(d_model, max_len=self.history_lengths + self.future_steps)
 
-        self.proprio_norm = EmpiricalNormalization((self.proprio_dim,))
+        self.actor_proprio_norm = EmpiricalNormalization((self.actor_proprio_dim,))
+        self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
         self.motion_future_norm = EmpiricalNormalization((self.motion_future_dim,))
 
         self.actor_motion_future_proj = nn.Linear(self.motion_future_dim, d_model)
-        self.actor_proprio_history_proj = nn.Linear(self.proprio_dim, d_model)
+        self.actor_proprio_history_proj = nn.Linear(self.actor_proprio_dim, d_model)
         self.actor_modality_embed = nn.Embedding(2, d_model)
 
         actor_layer = nn.TransformerEncoderLayer(
@@ -238,7 +243,7 @@ class TransformerEncoderActorCritic(nn.Module):
         )
 
         self.critic_motion_future_proj = nn.Linear(self.motion_future_dim, d_model)
-        self.critic_proprio_history_proj = nn.Linear(self.proprio_dim, d_model)
+        self.critic_proprio_history_proj = nn.Linear(self.critic_proprio_dim, d_model)
         self.critic_modality_embed = nn.Embedding(2, d_model)
 
         critic_layer = nn.TransformerEncoderLayer(
@@ -262,6 +267,9 @@ class TransformerEncoderActorCritic(nn.Module):
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         self.apply(self._init_weights)
 
+        nn.init.constant_(self.actor_head[-1].weight, 1e-3)
+        nn.init.constant_(self.actor_head[-1].bias, 0.0)
+
         self.action_mean = None
         self.action_std = None
 
@@ -274,16 +282,10 @@ class TransformerEncoderActorCritic(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def _forward_transformer(self, observations: TensorDict,
+    def _forward_transformer(self, proprio_history, future_motion,
                              proprio_history_proj, motion_future_proj, modality_embed, encoder):
-        future_motion = observations["future_motion"]  # (B, future_steps, future_dim)
-        proprio_history = observations["proprio_history"]  # (B, history_steps, proprio_dim)
-        future_motion = self.motion_future_norm(future_motion)
-        proprio_history = self.proprio_norm(proprio_history)
-        type_0 = modality_embed(torch.tensor(0, device=proprio_history.device))
-        proprio_history_emb = proprio_history_proj(proprio_history) + type_0 # (B, 1, d_model)
-        type_1 = modality_embed(torch.tensor(1, device=proprio_history.device))
-        future_motion_emb = motion_future_proj(future_motion) + type_1
+        proprio_history_emb = proprio_history_proj(proprio_history) + modality_embed(self.type_0)
+        future_motion_emb = motion_future_proj(future_motion) + modality_embed(self.type_1)
         sequence = torch.cat([proprio_history_emb, future_motion_emb], dim=1)
         sequence = self.pos_encoder(sequence)
         transformer_out = encoder(sequence)
@@ -291,22 +293,25 @@ class TransformerEncoderActorCritic(nn.Module):
         return latent
 
     def _forward_actor(self, observations: TensorDict):
+        future_motion = self.motion_future_norm(observations["future_motion"])
+        proprio_history = self.actor_proprio_norm(observations["policy_proprio_history"])
+        
         return self._forward_transformer(
-            observations, 
-            proprio_history_proj=self.actor_proprio_history_proj, 
-            motion_future_proj=self.actor_motion_future_proj, 
-            modality_embed=self.actor_modality_embed, 
-            encoder=self.actor_encoder
+            proprio_history, future_motion,
+            self.actor_proprio_history_proj, self.actor_motion_future_proj, 
+            self.actor_modality_embed, self.actor_encoder
         )
 
     def _forward_critic(self, observations: TensorDict):
+        future_motion = self.motion_future_norm(observations["future_motion"])
+        proprio_history = self.critic_proprio_norm(observations["critic_proprio_history"])
+        
         return self._forward_transformer(
-            observations, 
-            proprio_history_proj=self.critic_proprio_history_proj, 
-            motion_future_proj=self.critic_motion_future_proj, 
-            modality_embed=self.critic_modality_embed, 
-            encoder=self.critic_encoder
+            proprio_history, future_motion,
+            self.critic_proprio_history_proj, self.critic_motion_future_proj, 
+            self.critic_modality_embed, self.critic_encoder
         )
+
     def get_value(self, observations: TensorDict) -> torch.Tensor:
         latent = self._forward_critic(observations)
         return self.critic_head(latent)
@@ -335,25 +340,21 @@ class TransformerEncoderActorCritic(nn.Module):
 
     def update_normalization(self, obs: TensorDict) -> None:
         if "future_motion" in obs:
-            future_motion = obs["future_motion"]
-            future_motion = future_motion.view(-1, future_motion.shape[-1])
-            self.motion_future_norm.update(future_motion)
-        if "proprio_history" in obs:
-            proprio_history = obs["proprio_history"]
-            # Flatten: [B, T, D] -> [B*T, D]
-            proprio_history = proprio_history.view(-1, proprio_history.shape[-1])
-            self.proprio_norm.update(proprio_history)
+            self.motion_future_norm.update(obs["future_motion"].view(-1, self.motion_future_dim))
+        if "policy_proprio_history" in obs:
+            self.actor_proprio_norm.update(obs["policy_proprio_history"].view(-1, self.actor_proprio_dim))
+        if "critic_proprio_history" in obs:
+            self.critic_proprio_norm.update(obs["critic_proprio_history"].view(-1, self.critic_proprio_dim))
 
 
     def reset(self, env_ids=None):
         pass
 
-    def _get_dim(self, obs, groups, keyword):
-        dim = 0
-        for key in groups["policy"]:
+    def _get_group_dim(self, obs, groups, group_name, keyword):
+        for key in groups.get(group_name, []):
             if keyword in key:
                 return obs[key].shape[-1]
-        return dim
+        return 0
 
     def _get_steps(self, obs, groups, keyword):
         for key in groups["policy"]:

@@ -19,7 +19,7 @@ class TransformerEncoderDecoderActorCriticCfg:
 @configclass
 class TransformerEncoderActorCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['TransformerEncoderActorCritic']).TransformerEncoderActorCritic"
-    d_model: int = 128
+    d_model: int = 256
     nhead: int = 2
     num_encoder_layers: int = 4
     dim_feedforward: int = 256
@@ -45,8 +45,8 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 100
     experiment_name = "unitree_g1_MotionTracking_flat"
     obs_groups = {
-        "policy": ["proprio_history", "future_motion"],
-        "critic": ["proprio_history", "future_motion"],
+        "policy": ["policy_proprio_history", "future_motion"],
+        "critic": ["critic_proprio_history", "future_motion"],
     }
     policy = TransformerEncoderActorCriticCfg()
     algorithm = RslRlPpoAlgorithmCfg(
