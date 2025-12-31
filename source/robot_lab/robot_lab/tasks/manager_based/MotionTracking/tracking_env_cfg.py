@@ -159,6 +159,8 @@ class ObservationsCfg:
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         actions = ObsTerm(func=mdp.last_action)
         frictions = ObsTerm(func=mdp.friction_coefficient, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
+        # static_frictions = ObsTerm(func=mdp.robot_static_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
+        # dynamic_frictions = ObsTerm(func=mdp.robot_dynamic_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
 
         def __post_init__(self):
             self.concatenate_terms = True   # [num_envs, history_length, proprio_dim]

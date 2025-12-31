@@ -424,3 +424,16 @@ def motion_anchor_ori_b(env: ManagerBasedEnv, command_name: str) -> torch.Tensor
     )
     mat = matrix_from_quat(ori)
     return mat[..., :2].reshape(mat.shape[0], -1)
+
+#----------------------------gain other obs----------------------------------------
+def robot_static_friction_obs(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    materials = asset.root_physx_view.get_material_properties()
+    static_friction = materials[:, :, 0]
+    return static_friction
+
+def robot_dynamic_friction_obs(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    materials = asset.root_physx_view.get_material_properties()
+    dynamic_friction = materials[:, :, 1]
+    return dynamic_friction
