@@ -77,10 +77,6 @@ class MotionCommand(CommandTerm):
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
-        print("-" * 50)
-        print(f"机器人 '{self.cfg.asset_name}' 的完整连杆顺序 (共 {len(self.robot.body_names)} 个):")
-        for i, name in enumerate(self.robot.body_names):
-            print(f"Index {i}: {name}")
         self.robot_anchor_body_index = self.robot.body_names.index(self.cfg.anchor_body_name)
         self.motion_anchor_body_index = self.cfg.body_names.index(self.cfg.anchor_body_name)
         self.body_indexes = torch.tensor(
