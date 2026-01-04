@@ -7,7 +7,7 @@ import torch
 network_script_directory = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/agents"
 if network_script_directory not in sys.path:
     sys.path.append(network_script_directory)
-from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic
+from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, TransformerEncoderMLPActorCritic
 from tensordict import TensorDict
 import utils.math as math_utils
 
@@ -92,13 +92,11 @@ class HumanoidEnv:
         
         self.last_action = torch.zeros(self.num_actions, device=self.device, dtype=torch.float32)
 
-        self.tar_obs_steps = torch.arange(self.future_steps, device=self.device, dtype=torch.int)
-        
-        print("Loading jit for policy: ", policy_path)
+        self.tar_obs_steps = torch.arange(1, self.future_steps + 1, device=self.device, dtype=torch.int)
         self.policy_path = policy_path
         self.proprio_history_buffer = deque(maxlen=self.history_length)
         for _ in range(self.history_length):
-            self.proprio_history_buffer.append(torch.zeros(self.proprio_dim, device=self.device, dtype=torch.float32))
+            self.proprio_history_buffer.append(torch.zeros(self.policy_proprio_dim, device=self.device, dtype=torch.float32))
         
         self.last_time = time.time()
 
@@ -123,28 +121,32 @@ class HumanoidEnv:
         self.num_actions = 23
         self.policy_cfg = {
             "num_actions": self.num_actions,
-            "d_model": 128,
+            "d_model": 256,
             "nhead": 2,
-            "num_encoder_layers": 4,
+            "num_encoder_layers": 1,
             "dim_feedforward": 256,
+            "mlp_hidden_dims": [1024, 512, 256, 128],
+            "activation": "elu", 
             "dropout": 0.0,
             "init_noise_std": 0.2,
         }
         num_bodies = 14 
-        self.proprio_dim = 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23
+        self.policy_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23
+        self.critic_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23
         self.future_motion_dim = (num_bodies * 3) + (num_bodies * 6) + (num_bodies * 3) + (num_bodies * 3) + 23 + 23
-        checkpoint = torch.load(self.policy_path, map_location=self.device)
-        if 'model_state_dict' in checkpoint:
-            state_dict = checkpoint['model_state_dict']
-        else:
-            state_dict = checkpoint
-        dummy_obs = TensorDict({
-            "proprio_history": torch.zeros(1, self.history_length, self.proprio_dim),
-            "future_motion": torch.zeros(1, self.future_steps, self.future_motion_dim)
-        }, batch_size=[1])
+        obs_groups = {
+            "policy": ["policy_proprio_history", "future_motion"],
+            "critic": ["critic_proprio_history", "future_motion"],
+        }
         
-        obs_groups = {"policy": ["proprio_history", "future_motion"]}
-        self.policy_net = TransformerEncoderActorCritic(
+        dummy_obs = {
+            "policy_proprio_history": torch.zeros(1, self.history_length, self.policy_proprio_dim),
+            "critic_proprio_history": torch.zeros(1, self.history_length, self.critic_proprio_dim),
+            "future_motion": torch.zeros(1, self.future_steps, self.future_motion_dim)
+        }
+        checkpoint = torch.load(self.policy_path, map_location=self.device)
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        self.policy_net = TransformerEncoderMLPActorCritic(
             obs=dummy_obs,
             obs_groups=obs_groups,
             **self.policy_cfg
@@ -172,17 +174,17 @@ class HumanoidEnv:
         curr_anchor_pos_w = self.body_pos_w[curr_timestep, self.anchor_index]
         diff_pos = body_pos_w - curr_anchor_pos_w.view(1, 1, 3)
 
-        T, B_num, _ = diff_pos.shape
-        heading_inv = heading_inv.view(1, 1, 4).expand(T, B_num, 4).reshape(-1, 4)
+        T, B, _ = diff_pos.shape
+        heading_inv = heading_inv.view(1, 1, 4).expand(T, B, 4).reshape(-1, 4)
 
         # 位置转换
-        motion_body_pos = math_utils.quat_apply(heading_inv, diff_pos.reshape(-1, 3)).view(T, B_num, 3)
+        motion_body_pos = math_utils.quat_apply(heading_inv, diff_pos.reshape(-1, 3)).view(T, B, 3)
         # 姿态转换 (Quat -> Relative Quat -> 6D)
         motion_body_quat = math_utils.quat_mul(heading_inv, body_quat_w.reshape(-1, 4))
-        motion_body_ori = math_utils.matrix_from_quat(motion_body_quat)[..., :2].reshape(T, B_num, 6)
+        motion_body_ori = math_utils.matrix_from_quat(motion_body_quat)[..., :2].reshape(T, B, 6)
         # 速度转换 (线性速度和角速度)
-        motion_body_lin_vel = math_utils.quat_apply(heading_inv, body_lin_vel_w.reshape(-1, 3)).view(T, B_num, 3)
-        motion_body_ang_vel = math_utils.quat_apply(heading_inv, body_ang_vel_w.reshape(-1, 3)).view(T, B_num, 3)
+        motion_body_lin_vel = math_utils.quat_apply(heading_inv, body_lin_vel_w.reshape(-1, 3)).view(T, B, 3)
+        motion_body_ang_vel = math_utils.quat_apply(heading_inv, body_ang_vel_w.reshape(-1, 3)).view(T, B, 3)
 
         future_obs = torch.cat([
             motion_body_pos.reshape(T, -1),      # (T, 14*3)
@@ -207,6 +209,9 @@ class HumanoidEnv:
         projected_gravity_b = math_utils.quat_apply_inverse(anchor_quat_w, gravity_vec_w)
 
         target_idx = min(curr_timestep, self.motion_len - 1)
+        motion_joint_pos = self.joint_pos[target_idx]
+        motion_joint_vel = self.joint_vel[target_idx]
+        command = torch.cat([motion_joint_pos, motion_joint_vel], dim=-1)
         rel_pos_w = self.body_pos_w[target_idx, self.anchor_index] - anchor_pos_w
         motion_anchor_pos_b = math_utils.quat_apply_inverse(anchor_quat_w, rel_pos_w)
         rel_quat_b = math_utils.quat_mul(math_utils.quat_conjugate(anchor_quat_w), self.body_quat_w[target_idx, self.anchor_index])
@@ -226,6 +231,7 @@ class HumanoidEnv:
         dof_vel = (dof_vel - 0)[self.mujoco2isaac_dof_index]
 
         proprio_obs = torch.cat([
+            command,
             base_lin_vel,          # 3
             base_ang_vel,         # 3
             motion_anchor_pos_b,  # 3
@@ -259,9 +265,9 @@ class HumanoidEnv:
             if i % self.sim_decimation == 0:
                 future_obs = self.get_future_obs(curr_timestep).unsqueeze(0)
                 self.proprio_history_buffer.append(proprio_obs)
-                proprio_history = torch.stack(list(self.proprio_history_buffer), dim=0).unsqueeze(0)
+                policy_proprio_history = torch.stack(list(self.proprio_history_buffer), dim=0).unsqueeze(0)
                 obs_dict = TensorDict({
-                    "proprio_history": proprio_history,
+                    "policy_proprio_history": policy_proprio_history,
                     "future_motion": future_obs
                 }, batch_size=[1])
                 with torch.no_grad():
@@ -297,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument('--robot', type=str, default="g1")
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
-    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2025-12-25_20-27-22/model_8000.pt"
+    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-01-03_19-26-39/model_3000.pt"
     motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/105_19_stageii.npz"
     assert os.path.exists(checkpoint), f"Policy path {checkpoint} does not exist!"
     

@@ -29,11 +29,11 @@ class TransformerEncoderActorCriticCfg:
 @configclass
 class TransformerEncoderMLPActorCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['TransformerEncoderMLPActorCritic']).TransformerEncoderMLPActorCritic"
-    d_model: int = 128
-    nhead: int = 1
-    num_encoder_layers: int = 2
-    dim_feedforward: int = 128
-    mlp_hidden_dims: list[int] = [512, 256, 128]
+    d_model: int = 256
+    nhead: int = 2
+    num_encoder_layers: int = 1
+    dim_feedforward: int = 256
+    mlp_hidden_dims: list[int] = [1024, 512, 256, 128]
     activation: str = "elu"
     dropout: float = 0.0
     init_noise_std: float = 0.2
@@ -48,7 +48,7 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         "policy": ["policy_proprio_history", "future_motion"],
         "critic": ["critic_proprio_history", "future_motion"],
     }
-    policy = TransformerEncoderActorCriticCfg()
+    policy = TransformerEncoderMLPActorCriticCfg()
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,

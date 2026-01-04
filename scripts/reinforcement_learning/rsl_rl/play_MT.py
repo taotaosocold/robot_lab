@@ -110,7 +110,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # disable randomization for play
     env_cfg.observations.future_motion.enable_corruption = False
-    env_cfg.observations.proprio.enable_corruption = False
+    env_cfg.observations.policy_proprio_history.enable_corruption = False
     # remove random pushing
     env_cfg.events.randomize_apply_external_force_torque = None
     env_cfg.events.push_robot = None
