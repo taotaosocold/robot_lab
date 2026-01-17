@@ -21,8 +21,10 @@ class TransformerEncoderActorCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['TransformerEncoderActorCritic']).TransformerEncoderActorCritic"
     d_model: int = 256
     nhead: int = 2
-    num_encoder_layers: int = 4
+    num_encoder_layers: int = 1
     dim_feedforward: int = 256
+    mlp_hidden_dims: list[int] = [1024, 512, 256, 128]
+    activation: str = "elu"
     dropout: float = 0.0
     init_noise_std: float = 0.2
 
@@ -56,7 +58,7 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         entropy_coef=0.005,
         num_learning_epochs=5,
         num_mini_batches=32,
-        learning_rate=1.0e-4,
+        learning_rate=1.0e-3,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,

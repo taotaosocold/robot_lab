@@ -9,7 +9,7 @@ if network_script_directory not in sys.path:
     sys.path.append(network_script_directory)
 from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, TransformerEncoderMLPActorCritic
 from tensordict import TensorDict
-import utils.math_utils as math_utils
+import utils.math as math_utils
 
 class HumanoidEnv:
     def __init__(self, policy_path, motion_path, robot_type="g1", device="cuda", record_video=False):
@@ -27,7 +27,7 @@ class HumanoidEnv:
         self.robot_body_indexes = torch.tensor([1, 3, 5, 7, 9, 11, 13, 14, 16, 18, 19, 21, 23, 24], device=self.device)
         self.anchor_index = 4
         if robot_type == "g1":
-            model_path = "/home/ubuntu/Desktop/hjq/assets/g1_23dof_rev_1_0.xml"
+            model_path = "/home/ubuntu/Desktop/hjq/assets/g1_23dof.xml"
             # 全是根据beyondmimic的配置而更改的参数
             self.stiffness = np.array([ 
                 40.179, 99.098, 40.179, 99.098, 28.501, 28.501,  # left leg
@@ -84,8 +84,6 @@ class HumanoidEnv:
         self.data = mujoco.MjData(self.model)
         mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
         mujoco.mj_step(self.model, self.data)
-
-        self.align_motion_to_robot()
         if self.record_video:
             self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data, 'offscreen')
         else:
@@ -99,7 +97,8 @@ class HumanoidEnv:
         self.proprio_history_buffer = deque(maxlen=self.history_length)
         for _ in range(self.history_length):
             self.proprio_history_buffer.append(torch.zeros(self.policy_proprio_dim, device=self.device, dtype=torch.float32))
-
+        
+        self.last_time = time.time()
 
     def load_motion(self):
         data = np.load(self.motion_path, allow_pickle=True)
@@ -116,85 +115,16 @@ class HumanoidEnv:
         self.motion_len = self.joint_pos.shape[0]
 
     def load_model(self):
-        print(f"Loading policy from {self.policy_path}")
+        print(f"Loading JIT policy from {self.policy_path}")
         self.future_steps = 35
         self.history_length = 6
         self.num_actions = 23
-        self.policy_cfg = {
-            "num_actions": self.num_actions,
-            "d_model": 256,
-            "nhead": 2,
-            "num_encoder_layers": 1,
-            "dim_feedforward": 256,
-            "mlp_hidden_dims": [1024, 512, 256, 128],
-            "activation": "elu", 
-            "dropout": 0.0,
-            "init_noise_std": 0.2,
-        }
+        self.policy_net = torch.jit.load(self.policy_path, map_location=self.device)
+        self.policy_net.eval()
         num_bodies = 14 
         self.policy_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23
-        self.critic_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23 + 32 + 32
         self.future_motion_dim = (num_bodies * 3) + (num_bodies * 6) + (num_bodies * 3) + (num_bodies * 3) + 23 + 23
-        obs_groups = {
-            "policy": ["policy_proprio_history", "future_motion"],
-            "critic": ["critic_proprio_history", "future_motion"],
-        }
-        
-        dummy_obs = {
-            "policy_proprio_history": torch.zeros(1, self.history_length, self.policy_proprio_dim),
-            "critic_proprio_history": torch.zeros(1, self.history_length, self.critic_proprio_dim),
-            "future_motion": torch.zeros(1, self.future_steps, self.future_motion_dim)
-        }
-        checkpoint = torch.load(self.policy_path, map_location=self.device)
-        state_dict = checkpoint.get('model_state_dict', checkpoint)
-        self.policy_net = TransformerEncoderMLPActorCritic(
-            obs=dummy_obs,
-            obs_groups=obs_groups,
-            **self.policy_cfg
-        )
-        self.policy_net.load_state_dict(state_dict)
-        self.policy_net.to(self.device)
-        self.policy_net.eval()
 
-    def align_motion_to_robot(self):
-        robot_pos = torch.from_numpy(self.data.body('torso_link').xpos.astype(np.float32)).to(self.device).unsqueeze(0)
-        robot_quat = torch.from_numpy(self.data.body('torso_link').xquat.astype(np.float32)).to(self.device).unsqueeze(0)
-
-        motion_pos_start = self.body_pos_w[0, self.anchor_index].unsqueeze(0) # [1, 3]
-        motion_quat_start = self.body_quat_w[0, self.anchor_index].unsqueeze(0) # [1, 4]
-
-        robot_yaw_quat = math_utils.yaw_quat(robot_quat)
-        motion_yaw_quat = math_utils.yaw_quat(motion_quat_start)
-        yaw_offset_quat = math_utils.quat_mul(robot_yaw_quat, math_utils.quat_inv(motion_yaw_quat))
-        yaw_offset_quat_exp = yaw_offset_quat.view(1, 1, 4)
-        pos_offset = robot_pos.clone()
-        pos_offset[..., 2] = 0
-        num_frames = self.body_pos_w.shape[0]
-        num_bodies = self.body_pos_w.shape[1]
-        m_pos_start_xy = motion_pos_start.clone()
-        m_pos_start_xy[..., 2] = 0
-        
-        centered_pos = self.body_pos_w - m_pos_start_xy.view(1, 1, 3)
-        self.body_pos_w = math_utils.quat_apply(
-            yaw_offset_quat_exp.expand(num_frames, num_bodies, 4), 
-            centered_pos.reshape(-1, 3)
-        ).view(num_frames, num_bodies, 3) + pos_offset.view(1, 1, 3)
-
-
-        self.body_lin_vel_w = math_utils.quat_apply(
-            yaw_offset_quat_exp.expand(num_frames, num_bodies, 4),
-            self.body_lin_vel_w.reshape(-1, 3)
-        ).view(num_frames, num_bodies, 3)
-        
-        self.body_ang_vel_w = math_utils.quat_apply(
-            yaw_offset_quat_exp.expand(num_frames, num_bodies, 4),
-            self.body_ang_vel_w.reshape(-1, 3)
-        ).view(num_frames, num_bodies, 3)
-
-        self.body_quat_w = math_utils.quat_mul(
-            yaw_offset_quat_exp.expand(num_frames, num_bodies, 4).reshape(-1, 4),
-            self.body_quat_w.reshape(-1, 4)
-        ).view(num_frames, num_bodies, 4)
 
     def get_future_obs(self, curr_timestep):
         target_indices = self.tar_obs_steps + curr_timestep
@@ -217,9 +147,12 @@ class HumanoidEnv:
         T, B, _ = diff_pos.shape
         heading_inv = heading_inv.view(1, 1, 4).expand(T, B, 4).reshape(-1, 4)
 
+        # 位置转换
         motion_body_pos = math_utils.quat_apply(heading_inv, diff_pos.reshape(-1, 3)).view(T, B, 3)
+        # 姿态转换 (Quat -> Relative Quat -> 6D)
         motion_body_quat = math_utils.quat_mul(heading_inv, body_quat_w.reshape(-1, 4))
         motion_body_ori = math_utils.matrix_from_quat(motion_body_quat)[..., :2].reshape(T, B, 6)
+        # 速度转换 (线性速度和角速度)
         motion_body_lin_vel = math_utils.quat_apply(heading_inv, body_lin_vel_w.reshape(-1, 3)).view(T, B, 3)
         motion_body_ang_vel = math_utils.quat_apply(heading_inv, body_ang_vel_w.reshape(-1, 3)).view(T, B, 3)
 
@@ -237,14 +170,14 @@ class HumanoidEnv:
     def get_proprio_obs(self, curr_timestep):
         dof_pos = torch.from_numpy(self.data.qpos[-self.num_dofs:].astype(np.float32)).to(self.device)
         dof_vel = torch.from_numpy(self.data.qvel[-self.num_dofs:].astype(np.float32)).to(self.device)
-        anchor_pos_w = torch.from_numpy(self.data.body('torso_link').xpos.astype(np.float32)).to(self.device)
-        anchor_quat_w = torch.from_numpy(self.data.body('torso_link').xquat.astype(np.float32)).to(self.device)
-        base_lin_vel = torch.from_numpy(self.data.sensor('imu-torso-linear-velocity').data.astype(np.float32)).to(self.device)
+        anchor_pos_w = torch.from_numpy(self.data.sensor('imu-torso-pos').data.astype(np.float32)).to(self.device)
+        anchor_quat_w = torch.from_numpy(self.data.sensor('imu-torso-quat').data.astype(np.float32)).to(self.device)
+        base_lin_vel = torch.from_numpy(self.data.sensor('imu-torso-lin-vel-r').data.astype(np.float32)).to(self.device)
         base_ang_vel = torch.from_numpy(self.data.sensor('imu-torso-angular-velocity').data.astype(np.float32)).to(self.device)
 
         gravity_vec_w = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32)
         projected_gravity_b = math_utils.quat_apply_inverse(anchor_quat_w, gravity_vec_w)
-        # compute motion anchor pos\ori_b
+
         target_idx = min(curr_timestep, self.motion_len - 1)
         motion_joint_pos = self.joint_pos[target_idx]
         motion_joint_vel = self.joint_vel[target_idx]
@@ -254,12 +187,13 @@ class HumanoidEnv:
         rel_quat_b = math_utils.quat_mul(math_utils.quat_conjugate(anchor_quat_w), self.body_quat_w[target_idx, self.anchor_index])
         motion_anchor_ori_b = math_utils.matrix_from_quat(rel_quat_b)[..., :2].reshape(-1)
 
-        # compute robot body pos\ori_r
         robot_body_pos_w = torch.from_numpy(self.data.xpos.astype(np.float32)).to(self.device)[self.robot_body_indexes]
         robot_body_quat_w = torch.from_numpy(self.data.xquat.astype(np.float32)).to(self.device)[self.robot_body_indexes]
         diff_p = robot_body_pos_w - anchor_pos_w.view(1, 3)
         anchor_quat_inv = math_utils.quat_conjugate(anchor_quat_w).view(1, 4).expand(len(self.robot_body_indexes), 4)
+            
         robot_body_pos_r = math_utils.quat_apply(anchor_quat_inv, diff_p).reshape(-1) # 14*3 = 42
+
         diff_q = math_utils.quat_mul(anchor_quat_inv, robot_body_quat_w)
         robot_body_ori_r = math_utils.matrix_from_quat(diff_q)[..., :2].reshape(-1) # 14*6 = 84
 
@@ -302,12 +236,8 @@ class HumanoidEnv:
                 future_obs = self.get_future_obs(curr_timestep).unsqueeze(0)
                 self.proprio_history_buffer.append(proprio_obs)
                 policy_proprio_history = torch.stack(list(self.proprio_history_buffer), dim=0).unsqueeze(0)
-                obs_dict = TensorDict({
-                    "policy_proprio_history": policy_proprio_history,
-                    "future_motion": future_obs
-                }, batch_size=[1])
                 with torch.no_grad():
-                    action = self.policy_net.act_inference(obs_dict).squeeze()
+                    action = self.policy_net(policy_proprio_history, future_obs).squeeze()
 
                 self.last_action = action.clone()                
 
@@ -339,8 +269,8 @@ if __name__ == "__main__":
     parser.add_argument('--robot', type=str, default="g1")
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
-    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-01-06_20-11-18/model_6300.pt"
-    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/105_17_stageii.npz"
+    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-01-03_19-26-39/exported/policy.pt"
+    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/105_19_stageii.npz"
     assert os.path.exists(checkpoint), f"Policy path {checkpoint} does not exist!"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"

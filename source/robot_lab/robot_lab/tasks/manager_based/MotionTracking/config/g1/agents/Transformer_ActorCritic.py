@@ -191,182 +191,6 @@ class TransformerEncoderActorCritic(nn.Module):
 
     def __init__(
         self, 
-        obs: TensorDict,
-        obs_groups: dict[str, list[str]],
-        num_actions: int,
-        d_model: int,
-        nhead: int,
-        num_encoder_layers: int,
-        dim_feedforward: int,
-        dropout: float,
-        init_noise_std: float,
-        **kwargs,
-    ):
-        super().__init__()
-        self.num_actions = num_actions
-        self.motion_future_dim = self._get_group_dim(obs, obs_groups, "policy", "future_motion")
-        self.actor_proprio_dim = self._get_group_dim(obs, obs_groups, "policy", "proprio_history")
-        self.critic_proprio_dim = self._get_group_dim(obs, obs_groups, "critic", "proprio_history")
-        self.future_steps = self._get_steps(obs, obs_groups, "future_motion")
-        self.history_lengths = self._get_steps(obs, obs_groups, "proprio_history")
-        self.d_model = d_model
-
-        self.register_buffer("type_0", torch.tensor(0, dtype=torch.long))
-        self.register_buffer("type_1", torch.tensor(1, dtype=torch.long))
-
-        self.pos_encoder = PositionalEncoding(d_model, max_len=self.history_lengths + self.future_steps)
-
-        self.actor_proprio_norm = EmpiricalNormalization((self.actor_proprio_dim,))
-        self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
-        self.motion_future_norm = EmpiricalNormalization((self.motion_future_dim,))
-
-        self.actor_motion_future_proj = nn.Linear(self.motion_future_dim, d_model)
-        self.actor_proprio_history_proj = nn.Linear(self.actor_proprio_dim, d_model)
-        self.actor_modality_embed = nn.Embedding(2, d_model)
-
-        actor_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True,
-        )
-        self.actor_encoder = nn.TransformerEncoder(actor_layer, num_layers=num_encoder_layers)
-
-        self.actor_head = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.Linear(d_model, d_model),
-            nn.GELU(),
-            nn.Linear(d_model, num_actions),
-        )
-
-        self.critic_motion_future_proj = nn.Linear(self.motion_future_dim, d_model)
-        self.critic_proprio_history_proj = nn.Linear(self.critic_proprio_dim, d_model)
-        self.critic_modality_embed = nn.Embedding(2, d_model)
-
-        critic_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True,
-        )
-        self.critic_encoder = nn.TransformerEncoder(critic_layer, num_layers=num_encoder_layers)
-
-        self.critic_head = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.Linear(d_model, 256),
-            nn.GELU(),
-            nn.Linear(256, 1),
-        )
-
-        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
-        self.apply(self._init_weights)
-
-        nn.init.constant_(self.actor_head[-1].weight, 1e-3)
-        nn.init.constant_(self.actor_head[-1].bias, 0.0)
-
-        self.action_mean = None
-        self.action_std = None
-
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-    def _forward_transformer(self, proprio_history, future_motion,
-                             proprio_history_proj, motion_future_proj, modality_embed, encoder):
-        proprio_history_emb = proprio_history_proj(proprio_history) + modality_embed(self.type_0)
-        future_motion_emb = motion_future_proj(future_motion) + modality_embed(self.type_1)
-        sequence = torch.cat([proprio_history_emb, future_motion_emb], dim=1)
-        sequence = self.pos_encoder(sequence)
-        transformer_out = encoder(sequence)
-        latent = transformer_out[:, self.history_lengths - 1, :]
-        return latent
-
-    def _forward_actor(self, observations: TensorDict):
-        future_motion = self.motion_future_norm(observations["future_motion"])
-        proprio_history = self.actor_proprio_norm(observations["policy_proprio_history"])
-        
-        return self._forward_transformer(
-            proprio_history, future_motion,
-            self.actor_proprio_history_proj, self.actor_motion_future_proj, 
-            self.actor_modality_embed, self.actor_encoder
-        )
-
-    def _forward_critic(self, observations: TensorDict):
-        future_motion = self.motion_future_norm(observations["future_motion"])
-        proprio_history = self.critic_proprio_norm(observations["critic_proprio_history"])
-        
-        return self._forward_transformer(
-            proprio_history, future_motion,
-            self.critic_proprio_history_proj, self.critic_motion_future_proj, 
-            self.critic_modality_embed, self.critic_encoder
-        )
-
-    def get_value(self, observations: TensorDict) -> torch.Tensor:
-        latent = self._forward_critic(observations)
-        return self.critic_head(latent)
-    
-    def evaluate(self, observations: TensorDict, **kwargs) -> torch.Tensor:
-        return self.get_value(observations)
-
-
-    def act(self, observations: TensorDict, **kwargs):
-        # 使用 Actor 路径
-        latent = self._forward_actor(observations)
-        self.action_mean = self.actor_head(latent)
-        self.action_std = self.std.expand_as(self.action_mean)
-        dist = Normal(self.action_mean, self.action_std)
-        if self.training:
-            self.entropy = dist.entropy().sum(dim=-1)
-        return dist.sample()
-
-    def get_actions_log_prob(self, actions):
-        dist = Normal(self.action_mean, self.action_std)
-        return dist.log_prob(actions).sum(dim=-1)
-    def act_inference(self, observations: TensorDict):
-        with torch.no_grad():
-            latent = self._forward_actor(observations)
-            return self.actor_head(latent)
-
-    def update_normalization(self, obs: TensorDict) -> None:
-        if "future_motion" in obs:
-            self.motion_future_norm.update(obs["future_motion"].view(-1, self.motion_future_dim))
-        if "policy_proprio_history" in obs:
-            self.actor_proprio_norm.update(obs["policy_proprio_history"].view(-1, self.actor_proprio_dim))
-        if "critic_proprio_history" in obs:
-            self.critic_proprio_norm.update(obs["critic_proprio_history"].view(-1, self.critic_proprio_dim))
-
-
-    def reset(self, env_ids=None):
-        pass
-
-    def _get_group_dim(self, obs, groups, group_name, keyword):
-        for key in groups.get(group_name, []):
-            if keyword in key:
-                return obs[key].shape[-1]
-        return 0
-
-    def _get_steps(self, obs, groups, keyword):
-        for key in groups["policy"]:
-            if keyword in key:
-                return obs[key].shape[1]
-        return 0
-
-class TransformerEncoderMLPActorCritic(nn.Module):
-    is_recurrent: bool = False
-
-    def __init__(
-        self, 
         obs: dict,
         obs_groups: dict[str, list[str]],
         num_actions: int,
@@ -481,6 +305,164 @@ class TransformerEncoderMLPActorCritic(nn.Module):
             proprio = self.actor_proprio_norm(observations["policy_proprio_history"])
             latent = self._forward_transformer(proprio, future, self.actor_proprio_proj, self.actor_future_proj, self.actor_encoder)
             return self.actor_mlp(latent)
+
+    def update_normalization(self, obs: dict) -> None:
+        if "future_motion" in obs:
+            self.motion_future_norm.update(obs["future_motion"].view(-1, self.actor_future_dim))
+        if "policy_proprio_history" in obs:
+            self.actor_proprio_norm.update(obs["policy_proprio_history"].view(-1, self.actor_proprio_dim))
+        if "critic_proprio_history" in obs:
+            self.critic_proprio_norm.update(obs["critic_proprio_history"].view(-1, self.critic_proprio_dim))
+
+    def _get_group_dim(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[-1]
+        raise KeyError(f"Could not find key containing '{keyword}' in obs_groups['{group_name}']")
+
+    def _get_group_steps(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[1]
+        return 0
+
+    def get_actions_log_prob(self, actions):
+        dist = Normal(self.action_mean, self.action_std)
+        return dist.log_prob(actions).sum(dim=-1)
+
+    def reset(self, env_ids=None):
+        pass
+
+class TransformerEncoderMLPActorCritic(nn.Module):
+    is_recurrent: bool = False
+
+    def __init__(
+        self, 
+        obs: dict,
+        obs_groups: dict[str, list[str]],
+        num_actions: int,
+        d_model: int, 
+        nhead: int,
+        num_encoder_layers: int,
+        dim_feedforward: int,
+        dropout: float,
+        init_noise_std: float,
+        mlp_hidden_dims: list[int], 
+        activation: str = "ELU",
+        **kwargs,
+    ):
+        super().__init__()
+        self.num_actions = num_actions
+        self.obs_groups = obs_groups
+        self.d_model = d_model
+
+        self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
+        self.actor_future_dim = self._get_group_dim(obs, "policy", "future_motion")
+        self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+        self.critic_future_dim = self._get_group_dim(obs, "critic", "future_motion")
+        
+        self.future_steps = self._get_group_steps(obs, "policy", "future_motion")
+        self.history_steps = self._get_group_steps(obs, "policy", "proprio_history")
+
+        self.actor_proprio_norm = EmpiricalNormalization((self.actor_proprio_dim,))
+        self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
+        self.motion_future_norm = EmpiricalNormalization((self.actor_future_dim,))
+
+        self.pos_encoder = PositionalEncoding(d_model, max_len=self.future_steps)
+        self.actor_future_proj = nn.Linear(self.actor_future_dim, d_model)  
+        actor_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
+            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
+        )
+        self.actor_future_encoder = nn.TransformerEncoder(actor_layer, num_layers=num_encoder_layers)
+
+        self.critic_future_proj = nn.Linear(self.critic_future_dim, d_model)
+        critic_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
+            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
+        )
+        self.critic_future_encoder = nn.TransformerEncoder(critic_layer, num_layers=num_encoder_layers)
+
+        actor_mlp_input_dim = d_model + (self.history_steps * self.actor_proprio_dim)
+        critic_mlp_input_dim = d_model + (self.history_steps * self.critic_proprio_dim)
+
+        self.actor_mlp = self._build_mlp(actor_mlp_input_dim, mlp_hidden_dims, num_actions, activation)
+        self.critic_mlp = self._build_mlp(critic_mlp_input_dim, mlp_hidden_dims, 1, activation)
+        
+        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        self.apply(self._init_weights)
+        
+        if isinstance(self.actor_mlp[-1], nn.Linear):
+            nn.init.constant_(self.actor_mlp[-1].weight, 1e-3)
+            nn.init.constant_(self.actor_mlp[-1].bias, 0.0)
+
+    def _build_mlp(self, input_dim, hidden_dims, output_dim, activation_name):
+        layers = []
+        curr_dim = input_dim
+        act_class = getattr(nn, activation_name.upper()) if isinstance(activation_name, str) else nn.ELU
+        for h in hidden_dims:
+            layers.append(nn.Linear(curr_dim, h))
+            layers.append(act_class())
+            curr_dim = h
+        layers.append(nn.Linear(curr_dim, output_dim))
+        return nn.Sequential(*layers)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                nn.init.constant_(module.bias, 0.0)
+
+    def _encode_future(self, future, proj_layer, encoder):
+        x = proj_layer(future)
+        x = self.pos_encoder(x)
+        x = encoder(x)
+        latent = torch.mean(x, dim=1) 
+        
+        return latent
+
+    def act(self, observations: dict, **kwargs):
+        future = self.motion_future_norm(observations["future_motion"])
+        proprio = self.actor_proprio_norm(observations["policy_proprio_history"])
+        future_latent = self._encode_future(future, self.actor_future_proj, self.actor_future_encoder)
+        
+        batch_size = proprio.shape[0]
+        proprio_flat = proprio.view(batch_size, -1) 
+        
+        combined_input = torch.cat([future_latent, proprio_flat], dim=-1)
+        
+        self.action_mean = self.actor_mlp(combined_input)
+        self.action_std = self.std.expand_as(self.action_mean)
+        
+        dist = Normal(self.action_mean, self.action_std)
+        if self.training:
+            self.entropy = dist.entropy().sum(dim=-1)
+        return dist.sample()
+
+    def get_value(self, observations: dict) -> torch.Tensor:
+        future = self.motion_future_norm(observations["future_motion"])
+        proprio = self.critic_proprio_norm(observations["critic_proprio_history"])
+        
+        future_latent = self._encode_future(future, self.critic_future_proj, self.critic_future_encoder)
+        proprio_flat = proprio.view(proprio.shape[0], -1)
+        
+        combined_input = torch.cat([future_latent, proprio_flat], dim=-1)
+        
+        return self.critic_mlp(combined_input)
+
+    def evaluate(self, observations: dict, **kwargs) -> torch.Tensor:
+        return self.get_value(observations)
+
+    def act_inference(self, observations: dict):
+        with torch.no_grad():
+            future = self.motion_future_norm(observations["future_motion"])
+            proprio = self.actor_proprio_norm(observations["policy_proprio_history"])
+            
+            future_latent = self._encode_future(future, self.actor_future_proj, self.actor_future_encoder)
+            proprio_flat = proprio.view(proprio.shape[0], -1)
+            
+            combined_input = torch.cat([future_latent, proprio_flat], dim=-1)
+            return self.actor_mlp(combined_input)
 
     def update_normalization(self, obs: dict) -> None:
         if "future_motion" in obs:

@@ -79,7 +79,7 @@ from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
-from utils.export import export_policy_as_onnx, export_policy_as_jit
+from utils.export import export_all
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
@@ -203,8 +203,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, path=export_model_dir, filename="policy.pt")
-    # export_policy_as_onnx(policy_nn, path=export_model_dir, filename="policy.onnx")
+    # export_all(resume_path)
 
     dt = env.unwrapped.step_dt
 

@@ -115,10 +115,10 @@ class ObservationsCfg:
 
     @configclass
     class FutureMotionCfg(ObsGroup):
-        motion_body_pos_r = ObsTerm(func=mdp.motion_body_pos_yaw_r, params={"command_name": "motion", "future_steps": 35})
-        motion_body_ori_r = ObsTerm(func=mdp.motion_body_ori_yaw_r, params={"command_name": "motion", "future_steps": 35})
-        motion_body_lin_vel_r = ObsTerm(func=mdp.motion_body_lin_vel_yaw_r, params={"command_name": "motion", "future_steps": 35})
-        motion_body_ang_vel_r = ObsTerm(func=mdp.motion_body_ang_vel_yaw_r, params={"command_name": "motion", "future_steps": 35})
+        motion_body_pos_rf = ObsTerm(func=mdp.motion_body_pos_yaw_rf, params={"command_name": "motion", "future_steps": 35})
+        motion_body_ori_rf = ObsTerm(func=mdp.motion_body_ori_yaw_rf, params={"command_name": "motion", "future_steps": 35})
+        motion_body_lin_vel_rf = ObsTerm(func=mdp.motion_body_lin_vel_yaw_rf, params={"command_name": "motion", "future_steps": 35})
+        motion_body_ang_vel_rf = ObsTerm(func=mdp.motion_body_ang_vel_yaw_rf, params={"command_name": "motion", "future_steps": 35})
         motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 35})
         motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 35})
         def __post_init__(self):
@@ -158,8 +158,8 @@ class ObservationsCfg:
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         actions = ObsTerm(func=mdp.last_action)
-        # static_frictions = ObsTerm(func=mdp.robot_static_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
-        # dynamic_frictions = ObsTerm(func=mdp.robot_dynamic_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
+        static_frictions = ObsTerm(func=mdp.robot_static_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
+        dynamic_frictions = ObsTerm(func=mdp.robot_dynamic_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
 
         def __post_init__(self):
             self.concatenate_terms = True   # [num_envs, history_length, proprio_dim]
@@ -252,13 +252,13 @@ class RewardsCfg:
         weight=1.0,
         params={"command_name": "motion", "std": 0.4},
     )
-    motion_relative_body_lin_vel = RewTerm(
-        func=mdp.motion_relative_body_lin_vel_error_exp,
+    motion_global_body_lin_vel = RewTerm(
+        func=mdp.motion_global_body_linear_velocity_error_exp,
         weight=1.0,
         params={"command_name": "motion", "std": 1.0},
     )
-    motion_relative_body_ang_vel = RewTerm(
-        func=mdp.motion_relative_body_ang_vel_exp,
+    motion_global_body_ang_vel = RewTerm(
+        func=mdp.motion_global_body_angular_velocity_error_exp,
         weight=1.0,
         params={"command_name": "motion", "std": 3.14},
     )
@@ -320,7 +320,7 @@ class MotionTrackingEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=2, env_spacing=2.5)
+    scene: MySceneCfg = MySceneCfg(num_envs=1, env_spacing=2.5)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

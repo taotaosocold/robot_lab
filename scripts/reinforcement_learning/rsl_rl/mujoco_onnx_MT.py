@@ -3,6 +3,7 @@ import numpy as np
 import mujoco, mujoco_viewer
 from tqdm import tqdm
 from collections import deque
+import onnxruntime as ort
 import torch
 network_script_directory = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/agents"
 if network_script_directory not in sys.path:
@@ -75,8 +76,8 @@ class HumanoidEnv:
             raise ValueError(f"Robot type {robot_type} not supported!")
         
         self.sim_duration = 60.0
-        self.sim_dt = 0.001
-        self.sim_decimation = 20
+        self.sim_dt = 0.005
+        self.sim_decimation = 4
         self.control_dt = self.sim_dt * self.sim_decimation
         
         self.model = mujoco.MjModel.from_xml_path(model_path)
@@ -116,45 +117,19 @@ class HumanoidEnv:
         self.motion_len = self.joint_pos.shape[0]
 
     def load_model(self):
-        print(f"Loading policy from {self.policy_path}")
+        print(f"Loading ONNX policy from {self.policy_path}")
+        # 基础参数依然需要，用于维度对齐
         self.future_steps = 35
         self.history_length = 6
         self.num_actions = 23
-        self.policy_cfg = {
-            "num_actions": self.num_actions,
-            "d_model": 256,
-            "nhead": 2,
-            "num_encoder_layers": 1,
-            "dim_feedforward": 256,
-            "mlp_hidden_dims": [1024, 512, 256, 128],
-            "activation": "elu", 
-            "dropout": 0.0,
-            "init_noise_std": 0.2,
-        }
-        num_bodies = 14 
-        self.policy_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23
-        self.critic_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23 + 32 + 32
-        self.future_motion_dim = (num_bodies * 3) + (num_bodies * 6) + (num_bodies * 3) + (num_bodies * 3) + 23 + 23
-        obs_groups = {
-            "policy": ["policy_proprio_history", "future_motion"],
-            "critic": ["critic_proprio_history", "future_motion"],
-        }
+        self.policy_proprio_dim = 259 # 对应你之前的 46+3+3+3+6+42+84+3+23+23+23
         
-        dummy_obs = {
-            "policy_proprio_history": torch.zeros(1, self.history_length, self.policy_proprio_dim),
-            "critic_proprio_history": torch.zeros(1, self.history_length, self.critic_proprio_dim),
-            "future_motion": torch.zeros(1, self.future_steps, self.future_motion_dim)
-        }
-        checkpoint = torch.load(self.policy_path, map_location=self.device)
-        state_dict = checkpoint.get('model_state_dict', checkpoint)
-        self.policy_net = TransformerEncoderMLPActorCritic(
-            obs=dummy_obs,
-            obs_groups=obs_groups,
-            **self.policy_cfg
-        )
-        self.policy_net.load_state_dict(state_dict)
-        self.policy_net.to(self.device)
-        self.policy_net.eval()
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if self.device == "cuda" else ['CPUExecutionProvider']
+        self.session = ort.InferenceSession(self.policy_path, providers=providers)
+        
+        # 获取输入节点的名称
+        self.input_name_proprio = self.session.get_inputs()[0].name
+        self.input_name_future = self.session.get_inputs()[1].name
 
     def align_motion_to_robot(self):
         robot_pos = torch.from_numpy(self.data.body('torso_link').xpos.astype(np.float32)).to(self.device).unsqueeze(0)
@@ -241,6 +216,8 @@ class HumanoidEnv:
         anchor_quat_w = torch.from_numpy(self.data.body('torso_link').xquat.astype(np.float32)).to(self.device)
         base_lin_vel = torch.from_numpy(self.data.sensor('imu-torso-linear-velocity').data.astype(np.float32)).to(self.device)
         base_ang_vel = torch.from_numpy(self.data.sensor('imu-torso-angular-velocity').data.astype(np.float32)).to(self.device)
+        # base_lin_vel = torch.from_numpy(self.data.qvel.astype(np.float32)[0:3]).to(self.device)
+        # base_ang_vel = torch.from_numpy(self.data.qvel.astype(np.float32)[3:6]).to(self.device)
 
         gravity_vec_w = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32)
         projected_gravity_b = math_utils.quat_apply_inverse(anchor_quat_w, gravity_vec_w)
@@ -301,15 +278,21 @@ class HumanoidEnv:
             if i % self.sim_decimation == 0:
                 future_obs = self.get_future_obs(curr_timestep).unsqueeze(0)
                 self.proprio_history_buffer.append(proprio_obs)
-                policy_proprio_history = torch.stack(list(self.proprio_history_buffer), dim=0).unsqueeze(0)
-                obs_dict = TensorDict({
-                    "policy_proprio_history": policy_proprio_history,
-                    "future_motion": future_obs
-                }, batch_size=[1])
-                with torch.no_grad():
-                    action = self.policy_net.act_inference(obs_dict).squeeze()
+                
+                policy_proprio_history = torch.stack(list(self.proprio_history_buffer), dim=0).unsqueeze(0).cpu().numpy()
+                future_obs = future_obs.cpu().numpy()
 
-                self.last_action = action.clone()                
+                inputs = {
+                    self.input_name_proprio: policy_proprio_history,
+                    self.input_name_future: future_obs
+                }
+                np.set_printoptions(threshold=np.inf, linewidth=np.inf)
+                ort_outputs = self.session.run(None, inputs)
+                action = ort_outputs[0].squeeze()
+
+                action = torch.from_numpy(action).to(self.device)
+
+                self.last_action = action.clone()               
 
                 self.pd_target = action * self.action_scale[self.mujoco2isaac_dof_index] + self.default_dof_pos[self.mujoco2isaac_dof_index]
                 self.pd_target = self.pd_target[self.isaac2mujoco_dof_index].cpu().numpy()
@@ -339,8 +322,8 @@ if __name__ == "__main__":
     parser.add_argument('--robot', type=str, default="g1")
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
-    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-01-06_20-11-18/model_6300.pt"
-    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/105_17_stageii.npz"
+    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-01-06_20-11-18/exported/policy.onnx"
+    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/02_01_stageii.npz"
     assert os.path.exists(checkpoint), f"Policy path {checkpoint} does not exist!"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
