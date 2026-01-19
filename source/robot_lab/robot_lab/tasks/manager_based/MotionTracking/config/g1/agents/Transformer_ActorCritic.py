@@ -333,7 +333,7 @@ class TransformerEncoderActorCritic(nn.Module):
     def reset(self, env_ids=None):
         pass
 
-class TransformerEncoderMLPActorCritic(nn.Module):
+class TransformerEncoderMLPActorMLPCritic(nn.Module):
     is_recurrent: bool = False
 
     def __init__(
@@ -359,7 +359,6 @@ class TransformerEncoderMLPActorCritic(nn.Module):
         self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
         self.actor_future_dim = self._get_group_dim(obs, "policy", "future_motion")
         self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
-        self.critic_future_dim = self._get_group_dim(obs, "critic", "future_motion")
         
         self.future_steps = self._get_group_steps(obs, "policy", "future_motion")
         self.history_steps = self._get_group_steps(obs, "policy", "proprio_history")
@@ -374,20 +373,12 @@ class TransformerEncoderMLPActorCritic(nn.Module):
             d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
             dropout=dropout, activation="gelu", batch_first=True, norm_first=True
         )
-        self.actor_future_encoder = nn.TransformerEncoder(actor_layer, num_layers=num_encoder_layers)
+        self.actor_encoder = nn.TransformerEncoder(actor_layer, num_layers=num_encoder_layers)
 
-        self.critic_future_proj = nn.Linear(self.critic_future_dim, d_model)
-        critic_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
-            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
-        )
-        self.critic_future_encoder = nn.TransformerEncoder(critic_layer, num_layers=num_encoder_layers)
-
-        actor_mlp_input_dim = d_model + (self.history_steps * self.actor_proprio_dim)
-        critic_mlp_input_dim = d_model + (self.history_steps * self.critic_proprio_dim)
+        actor_mlp_input_dim = d_model + self.actor_proprio_dim
 
         self.actor_mlp = self._build_mlp(actor_mlp_input_dim, mlp_hidden_dims, num_actions, activation)
-        self.critic_mlp = self._build_mlp(critic_mlp_input_dim, mlp_hidden_dims, 1, activation)
+        self.critic_mlp = self._build_mlp(self.critic_proprio_dim, mlp_hidden_dims, 1, activation)
         
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         self.apply(self._init_weights)
@@ -413,23 +404,20 @@ class TransformerEncoderMLPActorCritic(nn.Module):
             if isinstance(module, nn.Linear) and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-    def _encode_future(self, future, proj_layer, encoder):
-        x = proj_layer(future)
-        x = self.pos_encoder(x)
-        x = encoder(x)
-        latent = torch.mean(x, dim=1) 
-        
-        return latent
+    def _forward_actor_latent(self, future, proproi):
+        p_emb = self.proprio_proj(proprio)
+        f_emb = self.future_proj(future)
+        combined = torch.cat([p_emb, f_emb], dim=1)
+        combined = self.pos_encoder(combined)
+        out = self.actor_encoder(combined)
+        future_latent = torch.mean(encoded[:, self.history_steps, :], dim=1)
+        current_proprio = proprio[:, -1, :]
+        return torch.cat([future_latent, current_proprio], dim=-1)
 
     def act(self, observations: dict, **kwargs):
         future = self.motion_future_norm(observations["future_motion"])
         proprio = self.actor_proprio_norm(observations["policy_proprio_history"])
-        future_latent = self._encode_future(future, self.actor_future_proj, self.actor_future_encoder)
-        
-        batch_size = proprio.shape[0]
-        proprio_flat = proprio.view(batch_size, -1) 
-        
-        combined_input = torch.cat([future_latent, proprio_flat], dim=-1)
+        combined_input = self._forward_actor_latent(proprio, future)
         
         self.action_mean = self.actor_mlp(combined_input)
         self.action_std = self.std.expand_as(self.action_mean)
@@ -440,13 +428,9 @@ class TransformerEncoderMLPActorCritic(nn.Module):
         return dist.sample()
 
     def get_value(self, observations: dict) -> torch.Tensor:
-        future = self.motion_future_norm(observations["future_motion"])
-        proprio = self.critic_proprio_norm(observations["critic_proprio_history"])
-        
-        future_latent = self._encode_future(future, self.critic_future_proj, self.critic_future_encoder)
-        proprio_flat = proprio.view(proprio.shape[0], -1)
-        
-        combined_input = torch.cat([future_latent, proprio_flat], dim=-1)
+        proprio = observations["critic_proprio_history"][:, -1, :]
+        proprio = self.critic_proprio_norm(proprio)
+        return self.critic_mlp(proprio)
         
         return self.critic_mlp(combined_input)
 
@@ -458,10 +442,7 @@ class TransformerEncoderMLPActorCritic(nn.Module):
             future = self.motion_future_norm(observations["future_motion"])
             proprio = self.actor_proprio_norm(observations["policy_proprio_history"])
             
-            future_latent = self._encode_future(future, self.actor_future_proj, self.actor_future_encoder)
-            proprio_flat = proprio.view(proprio.shape[0], -1)
-            
-            combined_input = torch.cat([future_latent, proprio_flat], dim=-1)
+            combined_input = self._forward_actor_latent(proprio, future)
             return self.actor_mlp(combined_input)
 
     def update_normalization(self, obs: dict) -> None:
