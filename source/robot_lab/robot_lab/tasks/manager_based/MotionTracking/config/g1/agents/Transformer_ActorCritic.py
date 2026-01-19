@@ -404,13 +404,13 @@ class TransformerEncoderMLPActorMLPCritic(nn.Module):
             if isinstance(module, nn.Linear) and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-    def _forward_actor_latent(self, future, proproi):
+    def _forward_actor_latent(self, future, proprio):
         p_emb = self.proprio_proj(proprio)
         f_emb = self.future_proj(future)
         combined = torch.cat([p_emb, f_emb], dim=1)
         combined = self.pos_encoder(combined)
         out = self.actor_encoder(combined)
-        future_latent = torch.mean(encoded[:, self.history_steps, :], dim=1)
+        future_latent = out[:, self.history_steps, :]
         current_proprio = proprio[:, -1, :]
         return torch.cat([future_latent, current_proprio], dim=-1)
 
