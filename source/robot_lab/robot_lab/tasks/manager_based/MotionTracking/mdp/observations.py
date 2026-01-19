@@ -22,6 +22,13 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 # ----------------------------gain robot obs----------------------------------------
+def get_robot_heading_inv(anchor_quat_w: torch.Tensor, num_bodies: int) -> torch.Tensor:
+    roll, pitch, yaw = euler_xyz_from_quat(anchor_quat_w)
+    zeros = torch.zeros_like(yaw)
+    heading_quat = quat_from_euler_xyz(zeros, zeros, yaw)
+    heading_inv = quat_conjugate(heading_quat)
+    return heading_inv.unsqueeze(1).repeat(1, num_bodies, 1)
+
 # current global robot root position [num_envs, 3]
 def robot_anchor_pos_w(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
@@ -84,6 +91,41 @@ def robot_body_ori_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     )
     mat = matrix_from_quat(ori_b)
     return mat[..., :2].reshape(mat.shape[0], -1)
+
+def robot_body_pos_yaw_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    num_bodies = len(command.cfg.body_names)
+    anchor_pos_w = command.robot_anchor_pos_w  # [num_envs, 3]
+    body_pos_w = command.robot_body_pos_w      # [num_envs, num_bodies, 3]
+    root_heading_inv = get_robot_heading_inv(command.robot_anchor_quat_w, num_bodies)
+    pos_diff = body_pos_w - anchor_pos_w.unsqueeze(1).repeat(1, num_bodies, 1)
+    body_pos_r = quat_apply(root_heading_inv, pos_diff)
+    return body_pos_r.view(env.num_envs, -1)
+
+def robot_body_ori_yaw_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    num_bodies = len(command.cfg.body_names)
+    body_quat_w = command.robot_body_quat_w    # [num_envs, num_bodies, 4]
+    root_heading_inv = get_robot_heading_inv(command.robot_anchor_quat_w, num_bodies)
+    body_quat_r = quat_mul(root_heading_inv, body_quat_w)
+    mat = matrix_from_quat(body_quat_r)
+    return mat[..., :2].reshape(mat.shape[0], -1)
+
+def robot_body_lin_vel_yaw_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    num_bodies = len(command.cfg.body_names)
+    body_lin_vel_w = command.robot_body_lin_vel_w # [num_envs, num_bodies, 3]
+    root_heading_inv = get_robot_heading_inv(command.robot_anchor_quat_w, num_bodies)
+    body_lin_vel_r = quat_apply(root_heading_inv, body_lin_vel_w)
+    return body_lin_vel_r.view(env.num_envs, -1)
+
+def robot_body_ang_vel_yaw_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    num_bodies = len(command.cfg.body_names)
+    body_ang_vel_w = command.robot_body_ang_vel_w # [num_envs, num_bodies, 3]
+    root_heading_inv = get_robot_heading_inv(command.robot_anchor_quat_w, num_bodies)
+    body_ang_vel_r = quat_apply(root_heading_inv, body_ang_vel_w)
+    return body_ang_vel_r.view(env.num_envs, -1)
 
 # ----------------------------gain global motion obs----------------------------------------
 def motion_future_frames(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:

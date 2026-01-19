@@ -47,6 +47,10 @@ class MotionLoader:
         motion_body_quat_w = []
         motion_body_lin_vel_w = []
         motion_body_ang_vel_w = []
+        motion_body_pos_r = []
+        motion_body_quat_r = []
+        motion_body_lin_vel_r = []
+        motion_body_ang_vel_r = []
         motion_frames = []
         for i, file_path in enumerate(self.motion_files):
             data = np.load(file_path)
@@ -58,6 +62,10 @@ class MotionLoader:
             motion_body_quat_w.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=self.device))
             motion_body_lin_vel_w.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=self.device))
             motion_body_ang_vel_w.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=self.device))
+            motion_body_pos_r.append(torch.tensor(data["body_pos_r"], dtype=torch.float32, device=self.device))
+            motion_body_quat_r.append(torch.tensor(data["body_quat_r"], dtype=torch.float32, device=self.device))
+            motion_body_lin_vel_r.append(torch.tensor(data["body_lin_vel_r"], dtype=torch.float32, device=self.device))
+            motion_body_ang_vel_r.append(torch.tensor(data["body_ang_vel_r"], dtype=torch.float32, device=self.device))
             motion_frames.append(data["joint_pos"].shape[0])
         
         self.motion_name = motion_name
@@ -67,6 +75,10 @@ class MotionLoader:
         self.motion_body_quat_w = torch.cat(motion_body_quat_w, dim=0)
         self.motion_body_lin_vel_w = torch.cat(motion_body_lin_vel_w, dim=0)
         self.motion_body_ang_vel_w = torch.cat(motion_body_ang_vel_w, dim=0)
+        self.motion_body_pos_r = torch.cat(motion_body_pos_r, dim=0)    # [total_frames, 27, 3]
+        self.motion_body_quat_r = torch.cat(motion_body_quat_r, dim=0)
+        self.motion_body_lin_vel_r = torch.cat(motion_body_lin_vel_r, dim=0)
+        self.motion_body_ang_vel_r = torch.cat(motion_body_ang_vel_r, dim=0)
         self.motion_frames = torch.tensor(motion_frames, dtype=torch.long, device=self.device) #[20, 30...]
         self.motion_start = torch.cat([torch.zeros(1, dtype=torch.long, device=self.device), self.motion_frames.cumsum(dim=0)[:-1]]) #[0, 20, 50...]
 
