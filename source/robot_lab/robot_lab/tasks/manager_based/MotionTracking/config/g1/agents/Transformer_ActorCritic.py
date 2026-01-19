@@ -367,7 +367,8 @@ class TransformerEncoderMLPActorMLPCritic(nn.Module):
         self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
         self.motion_future_norm = EmpiricalNormalization((self.actor_future_dim,))
 
-        self.pos_encoder = PositionalEncoding(d_model, max_len=self.future_steps)
+        self.pos_encoder = PositionalEncoding(d_model, max_len=self.history_steps + self.future_steps)
+        self.actor_proprio_proj = nn.Linear(self.actor_proprio_dim, d_model)
         self.actor_future_proj = nn.Linear(self.actor_future_dim, d_model)  
         actor_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
@@ -405,8 +406,8 @@ class TransformerEncoderMLPActorMLPCritic(nn.Module):
                 nn.init.constant_(module.bias, 0.0)
 
     def _forward_actor_latent(self, future, proprio):
-        p_emb = self.proprio_proj(proprio)
-        f_emb = self.future_proj(future)
+        p_emb = self.actor_proprio_proj(proprio)
+        f_emb = self.actor_future_proj(future)
         combined = torch.cat([p_emb, f_emb], dim=1)
         combined = self.pos_encoder(combined)
         out = self.actor_encoder(combined)
