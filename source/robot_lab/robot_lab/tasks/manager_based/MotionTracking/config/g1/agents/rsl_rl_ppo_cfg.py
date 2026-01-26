@@ -63,6 +63,7 @@ class MOEMLPActorMLPCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['MOEMLPActorMLPCritic']).MOEMLPActorMLPCritic"
     num_experts: int = 3
     mlp_hidden_dims: list[int] = [512, 256, 128]
+    gate_mlp_hidden_dims: list[int] = [1024, 512, 256, 128]
     activation: str = "elu"
     init_noise_std: float = 1.0
 
@@ -99,14 +100,14 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         "policy": ["policy_proprio_history", "future_motion"],
         "critic": ["critic_proprio_history", "future_motion"],
     }
-    policy = MOEMLPTransformerEncoderActorMLPCriticCfg()
+    policy = MOEMLPActorMLPCriticCfg()
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
         entropy_coef=0.005,
         num_learning_epochs=5,
-        num_mini_batches=4,
+        num_mini_batches=8,
         learning_rate=1.0e-3,
         schedule="adaptive",
         gamma=0.99,

@@ -633,27 +633,30 @@ class MOEMLPActorMLPCritic(nn.Module):
         obs_groups: dict[str, list[str]],
         num_actions: int,
         num_experts: int,
-        mlp_hidden_dims: list[int], 
+        mlp_hidden_dims: list[int],
+        gate_mlp_hidden_dims: list[int],
         init_noise_std: float,
         activation: str,
         **kwargs,
     ):
         super().__init__()
         self.num_actions = num_actions
-        print("-" * 100)
-        print(self.num_actions)
         self.obs_groups = obs_groups
         self.num_experts = num_experts
 
         self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
         self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+        self.actor_future_dim = self._get_group_dim(obs, "policy", "future_motion")
+        self.future_steps = self._get_group_steps(obs, "policy", "future_motion")
 
         self.actor_proprio_norm = EmpiricalNormalization((self.actor_proprio_dim,))
         self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
 
+        gate_input_dim = self.future_steps * self.actor_future_dim
+        self.actor_future_norm = EmpiricalNormalization((gate_input_dim,))
         self.gate_mlp = self._build_mlp(
-            self.actor_proprio_dim, 
-            mlp_hidden_dims, 
+            gate_input_dim, 
+            gate_mlp_hidden_dims, 
             num_experts, 
             activation
         )
@@ -668,13 +671,20 @@ class MOEMLPActorMLPCritic(nn.Module):
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         self.apply(self._init_weights)
 
+    def _get_future_motion(self, observations: dict):
+        future_motion = observations["future_motion"]
+        future_motion = future_motion.reshape(future_motion.shape[0], -1)
+        future_motion = self.actor_future_norm(future_motion)
+        return future_motion.reshape(future_motion.shape[0], -1)
+
     def _get_proprio(self, observations: dict, key: str, norm_layer: nn.Module):
         proprio = observations[key][:, -1, :]
         return norm_layer(proprio)
 
     def act(self, observations: dict, **kwargs):
+        future_motion = self._get_future_motion(observations)
         proprio = self._get_proprio(observations, "policy_proprio_history", self.actor_proprio_norm)
-        gate_weights = F.softmax(self.gate_mlp(proprio), dim=-1)
+        gate_weights = F.softmax(self.gate_mlp(future_motion), dim=-1)
         expert_outs = torch.stack([exp(proprio) for exp in self.experts], dim=1)
         self.action_mean = torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
         self.action_std = self.std.expand_as(self.action_mean)
@@ -687,7 +697,8 @@ class MOEMLPActorMLPCritic(nn.Module):
     def act_inference(self, observations: dict):
         with torch.no_grad():
             proprio = self._get_proprio(observations, "policy_proprio_history", self.actor_proprio_norm)
-            gate_weights = F.softmax(self.gate_mlp(proprio), dim=-1)
+            future_motion = self._get_future_motion(observations)
+            gate_weights = F.softmax(self.gate_mlp(future_motion), dim=-1)
             expert_outs = torch.stack([exp(proprio) for exp in self.experts], dim=1)
             return torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
 
@@ -720,12 +731,21 @@ class MOEMLPActorMLPCritic(nn.Module):
             self.actor_proprio_norm.update(obs["policy_proprio_history"][:, -1, :])
         if "critic_proprio_history" in obs:
             self.critic_proprio_norm.update(obs["critic_proprio_history"][:, -1, :])
+        if "future_motion" in obs:
+            future_motion = obs["future_motion"].reshape(obs["future_motion"].shape[0], -1)
+            self.actor_future_norm.update(future_motion)
 
     def _get_group_dim(self, obs, group_name, keyword):
         for key in self.obs_groups.get(group_name, []):
             if keyword in key:
                 return obs[key].shape[-1]
         raise KeyError(f"Could not find key containing '{keyword}' in obs_groups['{group_name}']")
+
+    def _get_group_steps(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[1]
+        return 0
 
     def get_actions_log_prob(self, actions):
         dist = Normal(self.action_mean, self.action_std)
