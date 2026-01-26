@@ -16,7 +16,7 @@ from isaaclab.utils.math import (
     subtract_frame_transforms
 )
 
-from robot_lab.tasks.manager_based.beyondmimic.mdp.commands import MotionCommand
+from robot_lab.tasks.manager_based.MotionTracking.mdp.commands import MotionCommand
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv

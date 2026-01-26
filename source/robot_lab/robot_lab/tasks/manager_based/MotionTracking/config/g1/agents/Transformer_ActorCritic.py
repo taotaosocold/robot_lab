@@ -5,6 +5,8 @@ from rsl_rl.modules.actor_critic import ActorCritic
 from torch.distributions import Normal
 from rsl_rl.networks import EmpiricalNormalization
 import math
+import numpy as np
+import torch.nn.functional as F
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
@@ -518,6 +520,7 @@ class TransformerEncoderActorMLPCritic(nn.Module):
 
         self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
         self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+        self.actor_future_dim = self._get_group_dim(obs, "policy", "future_motion")
         self.future_steps = self._get_group_steps(obs, "policy", "future_motion")
         self.history_steps = self._get_group_steps(obs, "policy", "proprio_history")
 
@@ -620,3 +623,380 @@ class TransformerEncoderActorMLPCritic(nn.Module):
 
     def reset(self, env_ids=None):
         pass
+
+class MOEMLPActorMLPCritic(nn.Module):
+    is_recurrent: bool = False
+
+    def __init__(
+        self, 
+        obs: dict,
+        obs_groups: dict[str, list[str]],
+        num_actions: int,
+        num_experts: int,
+        mlp_hidden_dims: list[int], 
+        init_noise_std: float,
+        activation: str,
+        **kwargs,
+    ):
+        super().__init__()
+        self.num_actions = num_actions
+        print("-" * 100)
+        print(self.num_actions)
+        self.obs_groups = obs_groups
+        self.num_experts = num_experts
+
+        self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
+        self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+
+        self.actor_proprio_norm = EmpiricalNormalization((self.actor_proprio_dim,))
+        self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
+
+        self.gate_mlp = self._build_mlp(
+            self.actor_proprio_dim, 
+            mlp_hidden_dims, 
+            num_experts, 
+            activation
+        )
+
+        self.experts = nn.ModuleList([
+            self._build_mlp(self.actor_proprio_dim, mlp_hidden_dims, num_actions, activation)
+            for _ in range(num_experts)
+        ])
+
+        self.critic_mlp = self._build_mlp(self.critic_proprio_dim, mlp_hidden_dims, 1, activation)
+        
+        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        self.apply(self._init_weights)
+
+    def _get_proprio(self, observations: dict, key: str, norm_layer: nn.Module):
+        proprio = observations[key][:, -1, :]
+        return norm_layer(proprio)
+
+    def act(self, observations: dict, **kwargs):
+        proprio = self._get_proprio(observations, "policy_proprio_history", self.actor_proprio_norm)
+        gate_weights = F.softmax(self.gate_mlp(proprio), dim=-1)
+        expert_outs = torch.stack([exp(proprio) for exp in self.experts], dim=1)
+        self.action_mean = torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+        self.action_std = self.std.expand_as(self.action_mean)
+        
+        dist = Normal(self.action_mean, self.action_std)
+        if self.training:
+            self.entropy = dist.entropy().sum(dim=-1)
+        return dist.sample()
+
+    def act_inference(self, observations: dict):
+        with torch.no_grad():
+            proprio = self._get_proprio(observations, "policy_proprio_history", self.actor_proprio_norm)
+            gate_weights = F.softmax(self.gate_mlp(proprio), dim=-1)
+            expert_outs = torch.stack([exp(proprio) for exp in self.experts], dim=1)
+            return torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+
+    def get_value(self, observations: dict) -> torch.Tensor:
+        proprio = self._get_proprio(observations, "critic_proprio_history", self.critic_proprio_norm)
+        return self.critic_mlp(proprio)
+
+    def evaluate(self, observations: dict, **kwargs) -> torch.Tensor:
+        return self.get_value(observations)
+
+    def _build_mlp(self, input_dim, hidden_dims, output_dim, activation_name):
+        layers = []
+        curr_dim = input_dim
+        act_class = getattr(nn, activation_name.upper()) if isinstance(activation_name, str) else nn.ELU
+        for h in hidden_dims:
+            layers.append(nn.Linear(curr_dim, h))
+            layers.append(act_class())
+            curr_dim = h
+        layers.append(nn.Linear(curr_dim, output_dim))
+        return nn.Sequential(*layers)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.orthogonal_(module.weight, gain=np.sqrt(2))
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0.0)
+
+    def update_normalization(self, obs: dict) -> None:
+        if "policy_proprio_history" in obs:
+            self.actor_proprio_norm.update(obs["policy_proprio_history"][:, -1, :])
+        if "critic_proprio_history" in obs:
+            self.critic_proprio_norm.update(obs["critic_proprio_history"][:, -1, :])
+
+    def _get_group_dim(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[-1]
+        raise KeyError(f"Could not find key containing '{keyword}' in obs_groups['{group_name}']")
+
+    def get_actions_log_prob(self, actions):
+        dist = Normal(self.action_mean, self.action_std)
+        return dist.log_prob(actions).sum(dim=-1)
+
+    def reset(self, env_ids=None):
+        pass
+
+class MOEMLPTransformerEncoderActorMLPCritic(nn.Module):
+    is_recurrent: bool = False
+
+    def __init__(
+        self, 
+        obs: dict,
+        obs_groups: dict[str, list[str]],
+        num_actions: int,
+        d_model: int, 
+        nhead: int,
+        num_encoder_layers: int,
+        dim_feedforward: int,
+        dropout: float,
+        num_experts: int,
+        mlp_hidden_dims: list[int], 
+        init_noise_std: float,
+        activation: str,
+        **kwargs,
+    ):
+        super().__init__()
+        self.num_actions = num_actions
+        self.obs_groups = obs_groups
+        self.num_experts = num_experts
+
+        self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
+        self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+        self.actor_future_dim = self._get_group_dim(obs, "policy", "future_motion")
+        self.future_steps = self._get_group_steps(obs, "policy", "future_motion")
+        self.history_steps = self._get_group_steps(obs, "policy", "proprio_history")
+
+        self.actor_future_norm = EmpiricalNormalization((self.actor_future_dim,))
+        self.actor_proprio_norm = EmpiricalNormalization((self.actor_proprio_dim,))
+        self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
+
+        self.future_proj = nn.Linear(self.actor_future_dim, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, max_len=self.future_steps)
+        
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
+            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
+        )
+        self.gate_transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+
+        gate_hidden_dim = d_model // 2
+        self.gate_head = nn.Sequential(
+            nn.Linear(d_model, gate_hidden_dim),
+            nn.ELU(),
+            nn.Linear(gate_hidden_dim, num_experts)
+        )
+
+        self.experts = nn.ModuleList([
+            self._build_mlp(self.actor_proprio_dim, mlp_hidden_dims, num_actions, activation)
+            for _ in range(num_experts)
+        ])
+
+        self.critic_mlp = self._build_mlp(self.critic_proprio_dim, mlp_hidden_dims, 1, activation)
+        
+        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        # self.apply(self._init_weights)
+
+    def _forward_gate(self, future_motion):
+        x = self.future_proj(future_motion)
+        x = self.pos_encoder(x)
+        latent = self.gate_transformer(x)
+        gate_feature = torch.mean(latent, dim=1) 
+        gate_weights = F.softmax(self.gate_head(gate_feature), dim=-1)
+        return gate_weights
+
+    def act(self, observations: dict, **kwargs):
+        future_motion = self.actor_future_norm(observations["future_motion"])
+        policy_proprio_history = self.actor_proprio_norm(observations["policy_proprio_history"])
+        gate_weights = self._forward_gate(future_motion) # [B, num_experts]
+        policy_proprio = policy_proprio_history[:, -1, :]
+        expert_outs = torch.stack([exp(policy_proprio) for exp in self.experts], dim=1) # [B, num_experts, num_actions]
+        
+        self.action_mean = torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+        self.action_std = self.std.expand_as(self.action_mean)
+        
+        dist = Normal(self.action_mean, self.action_std)
+        if self.training:
+            self.entropy = dist.entropy().sum(dim=-1)
+        return dist.sample()
+
+    def act_inference(self, observations: dict):
+        with torch.no_grad():
+            future_motion = self.actor_future_norm(observations["future_motion"])
+            proprio_history = self.actor_proprio_norm(observations["policy_proprio_history"])
+            
+            gate_weights = self._forward_gate(future_motion)
+            current_proprio = proprio_history[:, -1, :]
+            
+            expert_outs = torch.stack([exp(current_proprio) for exp in self.experts], dim=1)
+            return torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+
+    def evaluate(self, observations: dict, **kwargs) -> torch.Tensor:
+        return self.get_value(observations)
+
+    def get_value(self, observations: dict) -> torch.Tensor:
+        proprio = observations["critic_proprio_history"][:, -1, :]
+        proprio = self.critic_proprio_norm(proprio)
+        return self.critic_mlp(proprio)
+
+    def _build_mlp(self, input_dim, hidden_dims, output_dim, activation_name):
+        layers = []
+        curr_dim = input_dim
+        act_class = getattr(nn, activation_name.upper()) if isinstance(activation_name, str) else nn.ELU
+        for h in hidden_dims:
+            layers.append(nn.Linear(curr_dim, h)); layers.append(act_class())
+            curr_dim = h
+        layers.append(nn.Linear(curr_dim, output_dim))
+        return nn.Sequential(*layers)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.orthogonal_(module.weight, gain=np.sqrt(2))
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0.0)
+
+    def update_normalization(self, obs: dict) -> None:
+        if "future_motion" in obs:
+            self.actor_future_norm.update(obs["future_motion"].reshape(-1, self.actor_future_dim))
+        if "policy_proprio_history" in obs:
+            self.actor_proprio_norm.update(obs["policy_proprio_history"].reshape(-1, self.actor_proprio_dim))
+        if "critic_proprio_history" in obs:
+            self.critic_proprio_norm.update(obs["critic_proprio_history"].reshape(-1, self.critic_proprio_dim))
+
+    def _get_group_dim(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[-1]
+        raise KeyError(f"Could not find key containing '{keyword}' in obs_groups['{group_name}']")
+
+    def _get_group_steps(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[1]
+        return 0
+
+    def get_actions_log_prob(self, actions):
+        dist = Normal(self.action_mean, self.action_std)
+        return dist.log_prob(actions).sum(dim=-1)
+
+    def reset(self, env_ids=None):
+        pass
+
+
+class MLPActorMLPCritic(nn.Module):
+    is_recurrent: bool = False
+
+    def __init__(
+        self,
+        obs: TensorDict,
+        obs_groups: dict[str, list[str]],
+        num_actions: int,
+        actor_obs_normalization: bool,
+        critic_obs_normalization: bool,
+        actor_hidden_dims: tuple[int] | list[int],
+        critic_hidden_dims: tuple[int] | list[int],
+        activation: str = "elu",
+        init_noise_std: float = 1.0,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        self.num_actions = num_actions
+        self.obs_groups = obs_groups
+
+        self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
+        self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+        self.history_steps = self._get_group_steps(obs, "policy", "proprio_history")
+
+        self.actor = self._build_mlp(self.actor_proprio_dim, actor_hidden_dims, num_actions, activation)
+        print(f"Actor MLP: {self.actor}")
+
+        self.actor_obs_normalization = actor_obs_normalization
+        if actor_obs_normalization:
+            self.actor_obs_normalizer = EmpiricalNormalization((self.actor_proprio_dim,))
+        else:
+            self.actor_obs_normalizer = torch.nn.Identity()
+
+        self.critic = self._build_mlp(self.critic_proprio_dim, critic_hidden_dims, 1, activation)
+        print(f"Critic MLP: {self.critic}")
+
+        self.critic_obs_normalization = critic_obs_normalization
+        if critic_obs_normalization:
+            self.critic_obs_normalizer = EmpiricalNormalization((self.critic_proprio_dim,))
+        else:
+            self.critic_obs_normalizer = torch.nn.Identity()
+
+        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+
+        self.distribution = None
+        # self.apply(self._init_weights)
+
+        Normal.set_default_validate_args(False)
+
+    def _update_distribution(self, obs: TensorDict) -> None:
+        mean = self.actor(obs)
+        std = self.std.expand_as(mean)
+        self.distribution = Normal(mean, std)
+
+    def act(self, obs: TensorDict, **kwargs) -> torch.Tensor:
+        actor_obs = obs["policy_proprio_history"][:, -1, :] 
+        actor_obs = self.actor_obs_normalizer(actor_obs)
+        
+        self.action_mean = self.actor(actor_obs)
+        self.action_std = self.std.expand_as(self.action_mean)
+        self.distribution = Normal(self.action_mean, self.action_std)
+        
+        if self.training:
+            self.entropy = self.distribution.entropy().sum(dim=-1)
+        return self.distribution.sample()
+
+    def act_inference(self, obs: TensorDict) -> torch.Tensor:
+        actor_obs = obs["policy_proprio_history"][:, -1, :]
+        actor_obs = self.actor_obs_normalizer(actor_obs)
+        return self.actor(actor_obs)
+
+    def evaluate(self, obs: TensorDict, **kwargs) -> torch.Tensor:
+        critic_obs = obs["critic_proprio_history"][:, -1, :]
+        critic_obs = self.critic_obs_normalizer(critic_obs)
+        return self.critic(critic_obs)
+
+    def _get_group_dim(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[-1]
+        raise KeyError(f"Could not find key containing '{keyword}' in obs_groups['{group_name}']")
+
+    def _get_group_steps(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[1]
+        return 0
+
+    def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
+        return self.distribution.log_prob(actions).sum(dim=-1)
+
+    def reset(self, env_ids=None):
+        pass
+
+    def _build_mlp(self, input_dim, hidden_dims, output_dim, activation_name):
+        layers = []
+        curr_dim = input_dim
+        act_class = getattr(nn, activation_name.upper()) if isinstance(activation_name, str) else nn.ELU
+        for h in hidden_dims:
+            layers.append(nn.Linear(curr_dim, h))
+            layers.append(act_class())
+            curr_dim = h
+        layers.append(nn.Linear(curr_dim, output_dim))
+        return nn.Sequential(*layers)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.orthogonal_(module.weight, gain=np.sqrt(2))
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0.0)
+
+    def update_normalization(self, obs: TensorDict) -> None:
+        if self.actor_obs_normalization:
+            self.actor_obs_normalizer.update(obs["policy_proprio_history"][:, -1, :])
+        if self.critic_obs_normalization:
+            self.critic_obs_normalizer.update(obs["critic_proprio_history"][:, -1, :])
+
+    def load_state_dict(self, state_dict: dict, strict: bool = True) -> bool:
+        super().load_state_dict(state_dict, strict=strict)
+        return True

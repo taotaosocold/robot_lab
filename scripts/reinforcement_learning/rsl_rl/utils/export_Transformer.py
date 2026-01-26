@@ -11,7 +11,7 @@ MODEL_DIR = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/man
 if MODEL_DIR not in sys.path:
     sys.path.append(MODEL_DIR)
 
-from Transformer_ActorCritic import TransformerEncoderMLPActorCritic
+from Transformer_ActorCritic import MOEMLPTransformerEncoderActorMLPCritic
 
 class CleanMultiheadAttention(nn.Module):
     def __init__(self, original_mha):

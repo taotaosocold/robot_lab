@@ -115,47 +115,47 @@ class ObservationsCfg:
 
     @configclass
     class FutureMotionCfg(ObsGroup):
-        motion_anchor_pos_yaw_rf = ObsTerm(func=mdp.motion_anchor_pos_yaw_rf, params={"command_name": "motion", "future_steps": 5})
-        motion_anchor_ori_yaw_rf = ObsTerm(func=mdp.motion_anchor_ori_yaw_rf, params={"command_name": "motion", "future_steps": 5})
-        # motion_anchor_lin_vel_yaw_rf = ObsTerm(func=mdp.motion_anchor_lin_vel_yaw_rf, params={"command_name": "motion", "future_steps": 5})
-        # motion_anchor_ang_vel_yaw_rf = ObsTerm(func=mdp.motion_anchor_ang_vel_yaw_rf, params={"command_name": "motion", "future_steps": 5})
-        motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 5})
-        motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 5})
+        motion_body_pos_yaw_rf = ObsTerm(func=mdp.motion_body_pos_yaw_rf, params={"command_name": "motion", "future_steps": 15})
+        motion_body_ori_yaw_rf = ObsTerm(func=mdp.motion_body_ori_yaw_rf, params={"command_name": "motion", "future_steps": 15})
+        motion_body_lin_vel_yaw_rf = ObsTerm(func=mdp.motion_body_lin_vel_yaw_rf, params={"command_name": "motion", "future_steps": 15})
+        motion_body_ang_vel_yaw_rf = ObsTerm(func=mdp.motion_body_ang_vel_yaw_rf, params={"command_name": "motion", "future_steps": 15})
+        motion_joint_pos = ObsTerm(func=mdp.motion_joint_pos, params={"command_name": "motion", "future_steps": 15})
+        motion_joint_vel = ObsTerm(func=mdp.motion_joint_vel, params={"command_name": "motion", "future_steps": 15})
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = True   # [num_envs, future_steps, future_motion_dim]
 
     @configclass
     class PolicyProprioHistoryCfg(ObsGroup):
-        motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.25, n_max=0.25))
+        command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
+        # motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.25, n_max=0.25))
         motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"}, noise=Unoise(n_min=-0.05, n_max=0.05))
+        # robot_body_pos_r = ObsTerm(func=mdp.robot_body_pos_r, params={"command_name": "motion"}, noise=Unoise(n_min=-0.25, n_max=0.25))
+        # robot_body_ori_r = ObsTerm(func=mdp.robot_body_ori_r, params={"command_name": "motion"}, noise=Unoise(n_min=-0.05, n_max=0.05))
+        # base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.5, n_max=0.5))
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
-        projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
-        joint_pos = ObsTerm(func=mdp.joint_pos, noise=Unoise(n_min=-0.01, n_max=0.01))
-        joint_vel = ObsTerm(func=mdp.joint_vel, noise=Unoise(n_min=-3.5, n_max=3.5))
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5))
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True   # [num_envs, history_length, proprio_dim]
             self.flatten_history_dim = False
-            self.history_length = 6
+            self.history_length = 1
 
     @configclass
     class CriticProprioHistoryCfg(ObsGroup):
         command = ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"})
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
         motion_anchor_pos_b = ObsTerm(func=mdp.motion_anchor_pos_b, params={"command_name": "motion"})
         motion_anchor_ori_b = ObsTerm(func=mdp.motion_anchor_ori_b, params={"command_name": "motion"})
         robot_body_pos_r = ObsTerm(func=mdp.robot_body_pos_r, params={"command_name": "motion"})
         robot_body_ori_r = ObsTerm(func=mdp.robot_body_ori_r, params={"command_name": "motion"})
-        projected_gravity = ObsTerm(func=mdp.projected_gravity)
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         actions = ObsTerm(func=mdp.last_action)
-        static_frictions = ObsTerm(func=mdp.robot_static_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
-        dynamic_frictions = ObsTerm(func=mdp.robot_dynamic_friction_obs, params={"asset_cfg": SceneEntityCfg("robot", body_names=".*")})
 
         def __post_init__(self):
             self.concatenate_terms = True
@@ -260,28 +260,28 @@ class RewardsCfg:
     )
 
     # Others
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-0.1,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=[
-                    r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_roll_rubber_hand$)(?!right_wrist_roll_rubber_hand$).+$"
-                ],
-            ),
-            "threshold": 1.0,
-        },
-    )
-    balance_reward = RewTerm(
-        func=mdp.robot_orientation_balance,
-        weight=0.5,
-        params={
-            "asset_cfg": SceneEntityCfg("robot"), 
-            "command_name": "motion", 
-            "std": 0.3
-        }
-    )
+    # undesired_contacts = RewTerm(
+    #     func=mdp.undesired_contacts,
+    #     weight=-0.1,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg(
+    #             "contact_forces",
+    #             body_names=[
+    #                 r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_roll_rubber_hand$)(?!right_wrist_roll_rubber_hand$).+$"
+    #             ],
+    #         ),
+    #         "threshold": 1.0,
+    #     },
+    # )
+    # balance_reward = RewTerm(
+    #     func=mdp.robot_orientation_balance,
+    #     weight=0.5,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"), 
+    #         "command_name": "motion", 
+    #         "std": 0.3
+    #     }
+    # )
 
 
 @configclass
@@ -290,14 +290,26 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     anchor_pos = DoneTerm(
-        func=mdp.bad_anchor_pos,
+        func=mdp.bad_anchor_pos_z_only,
         params={"command_name": "motion", "threshold": 0.25},
     )
     anchor_ori = DoneTerm(
-        func=mdp.bad_anchor_gravity,
+        func=mdp.bad_anchor_ori,
         params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion", "threshold": 0.8},
     )
-
+    ee_body_pos = DoneTerm(
+        func=mdp.bad_motion_body_pos_z_only,
+        params={
+            "command_name": "motion",
+            "threshold": 0.25,
+            "body_names": [
+                "left_ankle_roll_link",
+                "right_ankle_roll_link",
+                "left_wrist_yaw_link",
+                "right_wrist_yaw_link",
+            ],
+        },
+    )
 
 @configclass
 class CurriculumCfg:
@@ -316,7 +328,7 @@ class MotionTrackingEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=2, env_spacing=2.5)
+    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=2.5)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

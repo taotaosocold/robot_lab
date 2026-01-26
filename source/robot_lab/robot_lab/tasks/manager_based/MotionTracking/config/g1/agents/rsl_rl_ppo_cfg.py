@@ -59,6 +59,37 @@ class TransformerEncoderActorMLPCriticCfg:
     init_noise_std: float = 0.2
 
 @configclass
+class MOEMLPActorMLPCriticCfg:
+    class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['MOEMLPActorMLPCritic']).MOEMLPActorMLPCritic"
+    num_experts: int = 3
+    mlp_hidden_dims: list[int] = [512, 256, 128]
+    activation: str = "elu"
+    init_noise_std: float = 1.0
+
+@configclass
+class MOEMLPTransformerEncoderActorMLPCriticCfg:
+    class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['MOEMLPTransformerEncoderActorMLPCritic']).MOEMLPTransformerEncoderActorMLPCritic"
+    d_model: int = 256
+    nhead: int = 4
+    num_encoder_layers: int = 1
+    num_experts: int = 3
+    dim_feedforward: int = 256
+    mlp_hidden_dims: list[int] = [512, 256, 128]
+    activation: str = "elu"
+    dropout: float = 0.1
+    init_noise_std: float = 1.0
+
+@configclass
+class MLPActorMLPCriticCfg:
+    class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['MLPActorMLPCritic']).MLPActorMLPCritic"
+    actor_obs_normalization: bool = False,
+    critic_obs_normalization: bool = False,
+    init_noise_std: float = 1.0
+    actor_hidden_dims: list[int] = [512, 256, 128]
+    critic_hidden_dims: list[int] = [512, 256, 128]
+    activation: str = "elu"
+
+@configclass
 class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 30000
@@ -68,7 +99,7 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         "policy": ["policy_proprio_history", "future_motion"],
         "critic": ["critic_proprio_history", "future_motion"],
     }
-    policy = TransformerEncoderMLPActorMLPCriticCfg()
+    policy = MOEMLPTransformerEncoderActorMLPCriticCfg()
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
