@@ -899,6 +899,179 @@ class MOEMLPTransformerEncoderActorMLPCritic(nn.Module):
     def reset(self, env_ids=None):
         pass
 
+class MOEMLPTransformerEncoderActorCritic(nn.Module):
+    is_recurrent: bool = False
+
+    def __init__(
+        self, 
+        obs: dict,
+        obs_groups: dict[str, list[str]],
+        num_actions: int,
+        d_model: int, 
+        nhead: int,
+        num_encoder_layers: int,
+        dim_feedforward: int,
+        dropout: float,
+        num_experts: int,
+        mlp_hidden_dims: list[int], 
+        init_noise_std: float,
+        activation: str,
+        **kwargs,
+    ):
+        super().__init__()
+        self.num_actions = num_actions
+        self.obs_groups = obs_groups
+        self.num_experts = num_experts
+
+        self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
+        self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+        self.future_dim = self._get_group_dim(obs, "policy", "future_motion")
+        self.future_steps = self._get_group_steps(obs, "policy", "future_motion")
+        self.history_steps = self._get_group_steps(obs, "policy", "proprio_history")
+
+        self.future_norm = EmpiricalNormalization((self.future_dim,))
+        self.actor_proprio_norm = EmpiricalNormalization((self.actor_proprio_dim,))
+        self.critic_proprio_norm = EmpiricalNormalization((self.critic_proprio_dim,))
+
+        self.actor_future_proj = nn.Linear(self.future_dim, d_model)
+        self.actor_pos_encoder = PositionalEncoding(d_model, max_len=self.future_steps)
+        
+        actor_encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
+            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
+        )
+        self.actor_gate_transformer = nn.TransformerEncoder(actor_encoder_layer, num_layers=num_encoder_layers)
+
+        gate_hidden_dim = d_model // 2
+        self.actor_gate_head = nn.Sequential(
+            nn.Linear(d_model, gate_hidden_dim),
+            nn.ELU(),
+            nn.Linear(gate_hidden_dim, num_experts)
+        )
+
+        self.actor_experts = nn.ModuleList([
+            self._build_mlp(self.actor_proprio_dim, mlp_hidden_dims, num_actions, activation)
+            for _ in range(num_experts)
+        ])
+
+        self.critic_future_proj = nn.Linear(self.future_dim, d_model)
+        self.critic_pos_encoder = PositionalEncoding(d_model, max_len=self.future_steps)
+
+        critic_encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward,
+            dropout=dropout, activation="gelu", batch_first=True, norm_first=True
+        )
+        self.critic_gate_transformer = nn.TransformerEncoder(critic_encoder_layer, num_layers=num_encoder_layers)
+        
+        self.critic_gate_head = nn.Sequential(
+            nn.Linear(d_model, gate_hidden_dim),
+            nn.ELU(),
+            nn.Linear(gate_hidden_dim, num_experts)
+        )
+        self.critic_experts = nn.ModuleList([
+            self._build_mlp(self.critic_proprio_dim, mlp_hidden_dims, 1, activation)
+            for _ in range(num_experts)
+        ])
+
+        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        # self.apply(self._init_weights)
+
+    def _forward_actor_gate(self, future_motion):
+        x = self.actor_future_proj(future_motion)
+        x = self.actor_pos_encoder(x)
+        latent = self.actor_gate_transformer(x)
+        gate_feature = torch.mean(latent, dim=1) 
+        gate_weights = F.softmax(self.actor_gate_head(gate_feature), dim=-1)
+        return gate_weights
+
+    def _forward_critic_gate(self, future_motion):
+        x = self.critic_future_proj(future_motion)
+        x = self.critic_pos_encoder(x)
+        latent = self.critic_gate_transformer(x)
+        gate_feature = torch.mean(latent, dim=1)
+        gate_weights = F.softmax(self.critic_gate_head(gate_feature), dim=-1)
+        return gate_weights
+
+    def act(self, observations: dict, **kwargs):
+        future_motion = self.future_norm(observations["future_motion"])
+        policy_proprio_history = self.actor_proprio_norm(observations["policy_proprio_history"])
+        gate_weights = self._forward_actor_gate(future_motion) # [B, num_experts]
+        policy_proprio = policy_proprio_history[:, -1, :]
+        expert_outs = torch.stack([exp(policy_proprio) for exp in self.actor_experts], dim=1) # [B, num_experts, num_actions]
+        
+        self.action_mean = torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+        self.action_std = self.std.expand_as(self.action_mean)
+        
+        dist = Normal(self.action_mean, self.action_std)
+        if self.training:
+            self.entropy = dist.entropy().sum(dim=-1)
+        return dist.sample()
+
+    def act_inference(self, observations: dict):
+        with torch.no_grad():
+            future_motion = self.future_norm(observations["future_motion"])
+            policy_proprio_history = self.actor_proprio_norm(observations["policy_proprio_history"])
+            
+            gate_weights = self._forward_actor_gate(future_motion)
+            policy_proprio = policy_proprio_history[:, -1, :]
+            
+            expert_outs = torch.stack([exp(policy_proprio) for exp in self.actor_experts], dim=1)
+            return torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+
+    def evaluate(self, observations: dict, **kwargs) -> torch.Tensor:
+        return self.get_value(observations)
+
+    def get_value(self, observations: dict) -> torch.Tensor:
+        future_motion = self.future_norm(observations["future_motion"])
+        critic_proprio_history = self.critic_proprio_norm(observations["critic_proprio_history"])
+        gate_weights = self._forward_critic_gate(future_motion) # [B, num_experts]
+        critic_proprio = critic_proprio_history[:, -1, :]
+        expert_outs = torch.stack([exp(critic_proprio) for exp in self.critic_experts], dim=1) # [B, num_experts, num_actions]
+        value = torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+        return value
+
+    def _build_mlp(self, input_dim, hidden_dims, output_dim, activation_name):
+        layers = []
+        curr_dim = input_dim
+        act_class = getattr(nn, activation_name.upper()) if isinstance(activation_name, str) else nn.ELU
+        for h in hidden_dims:
+            layers.append(nn.Linear(curr_dim, h)); layers.append(act_class())
+            curr_dim = h
+        layers.append(nn.Linear(curr_dim, output_dim))
+        return nn.Sequential(*layers)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.orthogonal_(module.weight, gain=np.sqrt(2))
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0.0)
+
+    def update_normalization(self, obs: dict) -> None:
+        if "future_motion" in obs:
+            self.future_norm.update(obs["future_motion"].reshape(-1, self.future_dim))
+        if "policy_proprio_history" in obs:
+            self.actor_proprio_norm.update(obs["policy_proprio_history"].reshape(-1, self.actor_proprio_dim))
+        if "critic_proprio_history" in obs:
+            self.critic_proprio_norm.update(obs["critic_proprio_history"].reshape(-1, self.critic_proprio_dim))
+
+    def _get_group_dim(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[-1]
+        raise KeyError(f"Could not find key containing '{keyword}' in obs_groups['{group_name}']")
+
+    def _get_group_steps(self, obs, group_name, keyword):
+        for key in self.obs_groups.get(group_name, []):
+            if keyword in key:
+                return obs[key].shape[1]
+        return 0
+
+    def get_actions_log_prob(self, actions):
+        dist = Normal(self.action_mean, self.action_std)
+        return dist.log_prob(actions).sum(dim=-1)
+
+    def reset(self, env_ids=None):
+        pass
 
 class MLPActorMLPCritic(nn.Module):
     is_recurrent: bool = False
