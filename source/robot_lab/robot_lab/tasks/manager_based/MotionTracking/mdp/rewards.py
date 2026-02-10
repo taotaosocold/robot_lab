@@ -19,6 +19,17 @@ if TYPE_CHECKING:
 def _get_body_indexes(command: MotionCommand, body_names: list[str] | None) -> list[int]:
     return [i for i, name in enumerate(command.cfg.body_names) if (body_names is None) or (name in body_names)]
 
+def motion_type_filter_wrapper(env, command_name: str, target_types: list[str], reward_fn, reward_params: dict = None):
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    current_type_ids = command.motion_type_id
+    combined_mask = torch.zeros_like(current_type_ids, dtype=torch.bool, device=env.device)
+    for t_type in target_types:
+        target_id = command.motion_type_name(t_type)
+        combined_mask |= (current_type_ids == target_id)
+    params = reward_params if reward_params is not None else {}
+    raw_reward = reward_fn(env, **params)
+    return raw_reward * combined_mask.float()
+
 #-----------------------------anchor global----------------------------
 def motion_global_anchor_position_error_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
@@ -115,3 +126,12 @@ def robot_orientation_balance(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg,
     robot_projected_gravity_b = math_utils.quat_apply_inverse(command.robot_anchor_quat_w, asset.data.GRAVITY_VEC_W)
     error = torch.sum(torch.square(robot_projected_gravity_b[:, :2]), dim=-1)
     return torch.exp(-error / std**2)
+
+def single_stance(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    in_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
+    body_heights = asset.data.body_pos_w[:, sensor_cfg.body_ids, 2]
+    is_ground_contact = in_contact & (body_heights < 0.05)
+    num_contacts = torch.sum(is_ground_contact.float(), dim=-1)
+    return (num_contacts == 1).float()

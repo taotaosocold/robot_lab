@@ -8,7 +8,7 @@ import torch
 network_script_directory = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/agents"
 if network_script_directory not in sys.path:
     sys.path.append(network_script_directory)
-from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, TransformerEncoderMLPActorCritic
+from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, MOEMLPTransformerEncoderActorMLPCritic
 from tensordict import TensorDict
 import utils.math_utils as math_utils
 
@@ -119,17 +119,17 @@ class HumanoidEnv:
     def load_model(self):
         print(f"Loading ONNX policy from {self.policy_path}")
         # 基础参数依然需要，用于维度对齐
-        self.future_steps = 35
-        self.history_length = 6
+        self.future_steps = 15
+        self.history_length = 1
         self.num_actions = 23
-        self.policy_proprio_dim = 259 # 对应你之前的 46+3+3+3+6+42+84+3+23+23+23
+        self.policy_proprio_dim = 256 # 对应你之前的 46+3+3+3+6+42+84+3+23+23+23
         
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if self.device == "cuda" else ['CPUExecutionProvider']
         self.session = ort.InferenceSession(self.policy_path, providers=providers)
         
         # 获取输入节点的名称
-        self.input_name_proprio = self.session.get_inputs()[0].name
-        self.input_name_future = self.session.get_inputs()[1].name
+        self.input_name_future = self.session.get_inputs()[0].name
+        self.input_name_proprio = self.session.get_inputs()[1].name
 
     def align_motion_to_robot(self):
         robot_pos = torch.from_numpy(self.data.body('torso_link').xpos.astype(np.float32)).to(self.device).unsqueeze(0)
@@ -245,13 +245,13 @@ class HumanoidEnv:
 
         proprio_obs = torch.cat([
             command,
-            base_lin_vel,          # 3
-            base_ang_vel,         # 3
             motion_anchor_pos_b,  # 3
             motion_anchor_ori_b,  # 6
+            base_lin_vel,          # 3
+            base_ang_vel,         # 3
             robot_body_pos_r,     # 42
             robot_body_ori_r,     # 84
-            projected_gravity_b,  # 3
+            # projected_gravity_b,  # 3
             dof_pos,              # 23
             dof_vel,              # 23
             self.last_action,        # 23
@@ -283,8 +283,8 @@ class HumanoidEnv:
                 future_obs = future_obs.cpu().numpy()
 
                 inputs = {
+                    self.input_name_future: future_obs,
                     self.input_name_proprio: policy_proprio_history,
-                    self.input_name_future: future_obs
                 }
                 np.set_printoptions(threshold=np.inf, linewidth=np.inf)
                 ort_outputs = self.session.run(None, inputs)
@@ -322,8 +322,8 @@ if __name__ == "__main__":
     parser.add_argument('--robot', type=str, default="g1")
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
-    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-01-06_20-11-18/exported/policy.onnx"
-    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/02_01_stageii.npz"
+    checkpoint = "/home/ubuntu/Desktop/RoboJuDo/assets/models/g1/beyondmimic/MOETransformerActorMLPCritic_updown.onnx"
+    motion_file = "/home/ubuntu/Desktop/RoboJuDo/assets/motions/g1/beyondmimic/75_20_poses.npz"
     assert os.path.exists(checkpoint), f"Policy path {checkpoint} does not exist!"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"

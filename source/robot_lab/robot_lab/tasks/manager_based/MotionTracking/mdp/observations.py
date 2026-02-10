@@ -92,6 +92,20 @@ def robot_body_ori_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     mat = matrix_from_quat(ori_b)
     return mat[..., :2].reshape(mat.shape[0], -1)
 
+def robot_body_lin_vel_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    num_bodies = len(command.cfg.body_names)
+    anchor_quat_inv = quat_conjugate(command.robot_anchor_quat_w)[:, None, :].repeat(1, num_bodies, 1)
+    body_lin_vel_r = quat_apply(anchor_quat_inv, command.robot_body_lin_vel_w)
+    return body_lin_vel_r.view(env.num_envs, -1)
+
+def robot_body_ang_vel_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    num_bodies = len(command.cfg.body_names)
+    anchor_quat_inv = quat_conjugate(command.robot_anchor_quat_w)[:, None, :].repeat(1, num_bodies, 1)
+    body_ang_vel_r = quat_apply(anchor_quat_inv, command.robot_body_ang_vel_w)
+    return body_ang_vel_r.view(env.num_envs, -1)
+
 def robot_body_pos_yaw_r(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     num_bodies = len(command.cfg.body_names)
@@ -393,6 +407,18 @@ def motion_anchor_ori_yaw_rf(env: ManagerBasedEnv, command_name: str, future_ste
     motion_anchor_quat_r = quat_mul(heading_inv, motion_anchor_quat_w)
     mat = matrix_from_quat(motion_anchor_quat_r)[..., :2]
     return mat.reshape(B, T, -1)
+
+def motion_anchor_ori_yaw_rf_flat(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    future_frames = motion_future_frames(env, command_name, future_steps)
+    motion_anchor_quat_w = command.motion.motion_body_quat_w[:, command.body_indexes][:, command.motion_anchor_body_index][future_frames]
+    heading_inv = get_current_heading_inv(env, command_name)
+    B, T, _ = motion_anchor_quat_w.shape
+    heading_inv = heading_inv.expand(B, T, 4).reshape(-1, 4)
+    motion_anchor_quat_w = motion_anchor_quat_w.reshape(-1, 4)
+    motion_anchor_quat_r = quat_mul(heading_inv, motion_anchor_quat_w)
+    mat = matrix_from_quat(motion_anchor_quat_r)[..., :2]
+    return mat.reshape(B, -1)
 
 # relative motion root linear velocity [num_envs, future_steps, 3]
 def motion_anchor_lin_vel_yaw_rf(env: ManagerBasedEnv, command_name: str, future_steps: int) -> torch.Tensor:

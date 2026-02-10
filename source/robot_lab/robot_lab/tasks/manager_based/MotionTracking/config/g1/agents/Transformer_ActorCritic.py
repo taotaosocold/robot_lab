@@ -768,7 +768,8 @@ class MOEMLPTransformerEncoderActorMLPCritic(nn.Module):
         dim_feedforward: int,
         dropout: float,
         num_experts: int,
-        mlp_hidden_dims: list[int], 
+        actor_mlp_hidden_dims: list[int],
+        critic_mlp_hidden_dims: list[int],
         init_noise_std: float,
         activation: str,
         **kwargs,
@@ -805,11 +806,11 @@ class MOEMLPTransformerEncoderActorMLPCritic(nn.Module):
         )
 
         self.experts = nn.ModuleList([
-            self._build_mlp(self.actor_proprio_dim, mlp_hidden_dims, num_actions, activation)
+            self._build_mlp(self.actor_proprio_dim, actor_mlp_hidden_dims, num_actions, activation)
             for _ in range(num_experts)
         ])
 
-        self.critic_mlp = self._build_mlp(self.critic_proprio_dim, mlp_hidden_dims, 1, activation)
+        self.critic_mlp = self._build_mlp(self.critic_proprio_dim, critic_mlp_hidden_dims, 1, activation)
         
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         # self.apply(self._init_weights)
@@ -923,8 +924,8 @@ class MOEMLPTransformerEncoderActorCritic(nn.Module):
         self.obs_groups = obs_groups
         self.num_experts = num_experts
 
-        self.actor_proprio_dim = self._get_group_dim(obs, "policy", "proprio_history")
-        self.critic_proprio_dim = self._get_group_dim(obs, "critic", "proprio_history")
+        self.actor_proprio_dim = self._get_group_dim(obs, "policy", "policy_proprio_history")
+        self.critic_proprio_dim = self._get_group_dim(obs, "critic", "critic_proprio_history")
         self.future_dim = self._get_group_dim(obs, "policy", "future_motion")
         self.future_steps = self._get_group_steps(obs, "policy", "future_motion")
         self.history_steps = self._get_group_steps(obs, "policy", "proprio_history")
@@ -1016,7 +1017,8 @@ class MOEMLPTransformerEncoderActorCritic(nn.Module):
             policy_proprio = policy_proprio_history[:, -1, :]
             
             expert_outs = torch.stack([exp(policy_proprio) for exp in self.actor_experts], dim=1)
-            return torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+            action = torch.bmm(gate_weights.unsqueeze(1), expert_outs).squeeze(1)
+            return action
 
     def evaluate(self, observations: dict, **kwargs) -> torch.Tensor:
         return self.get_value(observations)

@@ -15,7 +15,7 @@ if MODEL_PATH not in sys.path:
 
 # 2. 现在再尝试导入
 try:
-    from Transformer_ActorCritic import MOEMLPTransformerEncoderActorMLPCritic
+    from Transformer_ActorCritic import MOEMLPTransformerEncoderActorMLPCritic, MOEMLPTransformerEncoderActorCritic
 except ImportError as e:
     print(f"Error: 无法找到 Transformer_ActorCritic。请检查路径: {MODEL_PATH}")
     raise e
@@ -105,22 +105,22 @@ def export_moe_model(checkpoint_path, save_dir):
     # future_steps = 15, history_length = 1
     # 请确保这里的维度与训练时的 obs_group 拼接后的维度完全一致
     FUTURE_DIM = 256  # 示例值，需根据 ObsTerm 实际输出维度计算
-    PROPRIO_DIM = 124 # 示例值
+    PROPRIO_DIM = 334 # 示例值
     NUM_ACTIONS = 23
-    NUM_EXPERTS = 3   # 示例值
+    NUM_EXPERTS = 15   # 示例值
     
     device = torch.device("cpu")
     os.makedirs(save_dir, exist_ok=True)
 
     # 导入你的模型类
-    from Transformer_ActorCritic import MOEMLPTransformerEncoderActorMLPCritic
+    from Transformer_ActorCritic import MOEMLPTransformerEncoderActorMLPCritic, MOEMLPTransformerEncoderActorCritic
 
     # 初始化模型结构 (必须与训练时参数一致)
-    model = MOEMLPTransformerEncoderActorMLPCritic(
+    model = MOEMLPTransformerEncoderActorCritic(
         obs={
-            "future_motion": torch.zeros(1, 15, FUTURE_DIM),
+            "future_motion": torch.zeros(1, 20, FUTURE_DIM),
             "policy_proprio_history": torch.zeros(1, 1, PROPRIO_DIM),
-            "critic_proprio_history": torch.zeros(1, 1, 256)
+            "critic_proprio_history": torch.zeros(1, 1, 334)
         },
         obs_groups={
             "policy": ["future_motion", "policy_proprio_history"],
@@ -156,7 +156,7 @@ def export_moe_model(checkpoint_path, save_dir):
     wrapper = MOEPolicyExporterWrapper(model)
     
     # 模拟输入
-    dummy_future = torch.randn(1, 15, FUTURE_DIM)
+    dummy_future = torch.randn(1, 20, FUTURE_DIM)
     dummy_proprio = torch.randn(1, 1, PROPRIO_DIM)
 
     # 导出 JIT

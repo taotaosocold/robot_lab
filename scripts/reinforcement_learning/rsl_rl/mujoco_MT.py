@@ -7,7 +7,7 @@ import torch
 network_script_directory = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/agents"
 if network_script_directory not in sys.path:
     sys.path.append(network_script_directory)
-from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, TransformerEncoderMLPActorCritic
+from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, MOEMLPTransformerEncoderActorMLPCritic, MOEMLPTransformerEncoderActorCritic
 from tensordict import TensorDict
 import utils.math_utils as math_utils
 
@@ -75,8 +75,8 @@ class HumanoidEnv:
             raise ValueError(f"Robot type {robot_type} not supported!")
         
         self.sim_duration = 60.0
-        self.sim_dt = 0.001
-        self.sim_decimation = 20
+        self.sim_dt = 0.005
+        self.sim_decimation = 4
         self.control_dt = self.sim_dt * self.sim_decimation
         
         self.model = mujoco.MjModel.from_xml_path(model_path)
@@ -117,23 +117,24 @@ class HumanoidEnv:
 
     def load_model(self):
         print(f"Loading policy from {self.policy_path}")
-        self.future_steps = 35
-        self.history_length = 6
+        self.future_steps = 20
+        self.history_length = 1
         self.num_actions = 23
         self.policy_cfg = {
             "num_actions": self.num_actions,
             "d_model": 256,
-            "nhead": 2,
+            "nhead": 4,
             "num_encoder_layers": 1,
             "dim_feedforward": 256,
-            "mlp_hidden_dims": [1024, 512, 256, 128],
+            "num_experts": 12,
+            "mlp_hidden_dims": [512, 256, 128],
             "activation": "elu", 
             "dropout": 0.0,
             "init_noise_std": 0.2,
         }
         num_bodies = 14 
-        self.policy_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23
-        self.critic_proprio_dim = 46 + 3 + 3 + 3 + 6 + 42 + 84 + 3 + 23 + 23 + 23 + 32 + 32
+        self.policy_proprio_dim = 46 + 3 + 6 + 42 + 84 + 23 + 23 + 23 + 42 + 42
+        self.critic_proprio_dim = 46 + 3 + 6 + 42 + 84 + 23 + 23 + 23 + 42 + 42
         self.future_motion_dim = (num_bodies * 3) + (num_bodies * 6) + (num_bodies * 3) + (num_bodies * 3) + 23 + 23
         obs_groups = {
             "policy": ["policy_proprio_history", "future_motion"],
@@ -147,7 +148,7 @@ class HumanoidEnv:
         }
         checkpoint = torch.load(self.policy_path, map_location=self.device)
         state_dict = checkpoint.get('model_state_dict', checkpoint)
-        self.policy_net = TransformerEncoderMLPActorCritic(
+        self.policy_net = MOEMLPTransformerEncoderActorCritic(
             obs=dummy_obs,
             obs_groups=obs_groups,
             **self.policy_cfg
@@ -257,24 +258,29 @@ class HumanoidEnv:
         # compute robot body pos\ori_r
         robot_body_pos_w = torch.from_numpy(self.data.xpos.astype(np.float32)).to(self.device)[self.robot_body_indexes]
         robot_body_quat_w = torch.from_numpy(self.data.xquat.astype(np.float32)).to(self.device)[self.robot_body_indexes]
+        robot_body_lin_vel_w = torch.from_numpy(self.data.cvel.astype(np.float32)).to(self.device)[self.robot_body_indexes, 3:]
+        robot_body_ang_vel_w = torch.from_numpy(self.data.cvel.astype(np.float32)).to(self.device)[self.robot_body_indexes, :3]
         diff_p = robot_body_pos_w - anchor_pos_w.view(1, 3)
         anchor_quat_inv = math_utils.quat_conjugate(anchor_quat_w).view(1, 4).expand(len(self.robot_body_indexes), 4)
         robot_body_pos_r = math_utils.quat_apply(anchor_quat_inv, diff_p).reshape(-1) # 14*3 = 42
         diff_q = math_utils.quat_mul(anchor_quat_inv, robot_body_quat_w)
         robot_body_ori_r = math_utils.matrix_from_quat(diff_q)[..., :2].reshape(-1) # 14*6 = 84
-
+        robot_body_lin_vel_r = math_utils.quat_apply(anchor_quat_inv, robot_body_lin_vel_w).reshape(-1)
+        robot_body_ang_vel_r = math_utils.quat_apply(anchor_quat_inv, robot_body_ang_vel_w).reshape(-1)
         dof_pos = (dof_pos - self.default_dof_pos)[self.mujoco2isaac_dof_index]
         dof_vel = (dof_vel - 0)[self.mujoco2isaac_dof_index]
 
         proprio_obs = torch.cat([
             command,
-            base_lin_vel,          # 3
-            base_ang_vel,         # 3
             motion_anchor_pos_b,  # 3
             motion_anchor_ori_b,  # 6
             robot_body_pos_r,     # 42
             robot_body_ori_r,     # 84
-            projected_gravity_b,  # 3
+            robot_body_lin_vel_r, # 42
+            robot_body_ang_vel_r, # 42
+            # projected_gravity_b,  # 3
+            # base_lin_vel,          # 3
+            # base_ang_vel,         # 3
             dof_pos,              # 23
             dof_vel,              # 23
             self.last_action,        # 23
@@ -339,8 +345,8 @@ if __name__ == "__main__":
     parser.add_argument('--robot', type=str, default="g1")
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
-    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-01-06_20-11-18/model_6300.pt"
-    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/105_17_stageii.npz"
+    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-02-06_14-11-19/model_15900.pt"
+    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/dance/90_08_poses.npz"
     assert os.path.exists(checkpoint), f"Policy path {checkpoint} does not exist!"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"

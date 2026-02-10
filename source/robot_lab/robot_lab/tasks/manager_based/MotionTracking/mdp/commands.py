@@ -31,16 +31,27 @@ if TYPE_CHECKING:
 
 
 class MotionLoader:
-    def __init__(self, motion_folder: str, body_indexes: Sequence[int], device: str = "cpu"):
-        assert os.path.isdir(motion_folder), f"Invalid file path: {motion_folder}"
-        self.motion_files = [os.path.join(motion_folder, f) for f in os.listdir(motion_folder) if f.endswith('.npz')]
-        self.num_motions = len(self.motion_files)
+    def __init__(self, motion_folder: list[str], body_indexes: Sequence[int], device: str = "cpu"):
         self.device = device
+        # assert os.path.isdir(motion_folder), f"Invalid file path: {motion_folder}"
+        self.motion_files = []
+        self.motion_type_ids = []
+        self.unique_types = [os.path.basename(f.rstrip('/')) for f in motion_folder]
+        type_to_id = {name: i for i, name in enumerate(self.unique_types)}  
+        for folder in motion_folder:
+            group_name = os.path.basename(folder.rstrip('/'))
+            group_id = type_to_id[group_name]
+            files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.npz')]
+            self.motion_files.extend(files)
+            self.motion_type_ids.extend([group_id] * len(files))
+        self.motion_type_ids = torch.tensor(self.motion_type_ids, dtype=torch.float32, device=self.device)
+        self.num_motions = len(self.motion_files)
         self.load_motion()
 
     def load_motion(self):
         motion_fps = []
         motion_name = []
+        motion_type = []
         motion_joint_pos = []
         motion_joint_vel = []
         motion_body_pos_w = []
@@ -69,6 +80,7 @@ class MotionLoader:
             motion_frames.append(data["joint_pos"].shape[0])
         
         self.motion_name = motion_name
+        self.motion_type = motion_type
         self.motion_joint_pos = torch.cat(motion_joint_pos, dim=0)  # [total_frames, 23]
         self.motion_joint_vel = torch.cat(motion_joint_vel, dim=0)
         self.motion_body_pos_w = torch.cat(motion_body_pos_w, dim=0)    # [total_frames, 27, 3]
@@ -133,6 +145,13 @@ class MotionCommand(CommandTerm):
     @property
     def current_frame(self) -> torch.Tensor:
         return self.motion.motion_start[self.env_motion_idx] + self.time_steps
+
+    @property
+    def motion_type_id(self) -> torch.Tensor:
+        return self.motion.motion_type_ids[self.env_motion_idx]
+
+    def motion_type_name(self, name: str) -> int:
+        return self.motion.unique_types.index(name)
 
     @property
     def joint_pos(self) -> torch.Tensor:
@@ -244,9 +263,12 @@ class MotionCommand(CommandTerm):
             fail_motion = self.env_motion_idx[env_ids][episode_failed]
             self._current_motion_failed[:] = torch.bincount(fail_motion, minlength=self.motion.num_motions)
         
-        motion_sampling_probabilities = self.motion_failed_count + self.cfg.motion_adaptive_uniform_ratio / float(self.motion.num_motions)
-        motion_sampling_probabilities = motion_sampling_probabilities / motion_sampling_probabilities.sum()
-        sampled_motion = torch.multinomial(motion_sampling_probabilities, len(env_ids), replacement=True)
+        if self.cfg.enable_motion_adaptive_sampling:
+            motion_sampling_probabilities = self.motion_failed_count + self.cfg.motion_adaptive_uniform_ratio / float(self.motion.num_motions)
+            motion_sampling_probabilities = motion_sampling_probabilities / motion_sampling_probabilities.sum()
+            sampled_motion = torch.multinomial(motion_sampling_probabilities, len(env_ids), replacement=True)
+        else:
+            sampled_motion =  torch.randint(0, self.motion.num_motions, (len(env_ids),), device=self.device)
 
         # adaptive sampling clip
         if self.cfg.enable_bin_adaptive_sampling:
@@ -288,7 +310,9 @@ class MotionCommand(CommandTerm):
             # self.metrics["bin_sampling_top1_bin"][:] = imax.float() / self.bin_count
         else:
             self.env_motion_idx[env_ids] = sampled_motion
-            self.time_steps[env_ids] = 0
+            # self.time_steps[env_ids] = 0
+            motion_lengths = self.motion.motion_frames[sampled_motion]
+            self.time_steps[env_ids] = (torch.rand(len(env_ids), device=self.device) * motion_lengths).long()
 
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
@@ -424,6 +448,27 @@ class MotionCommand(CommandTerm):
             self.current_body_visualizers[i].visualize(self.robot_body_pos_w[:, i], self.robot_body_quat_w[:, i])
             self.goal_body_visualizers[i].visualize(self.body_pos_relative_w[:, i], self.body_quat_relative_w[:, i])
 
+    def set_motion_ids(self, env_ids: Sequence[int], motion_ids: Sequence[int]):
+        """
+        [Evaluation] 强制设置指定环境的运动ID，用于评估脚本遍历所有数据。
+        """
+        if not isinstance(motion_ids, torch.Tensor):
+            motion_ids = torch.tensor(motion_ids, dtype=torch.long, device=self.device)
+        
+        # 1. 设置运动索引
+        self.env_motion_idx[env_ids] = motion_ids
+        
+        # 2. 重置这些环境的时间步
+        self.time_steps[env_ids] = 0
+        
+        # 3. 立即更新一次目标姿态，确保 reset 后的第一帧是正确的
+        # 注意：这里我们调用私有方法或者更新逻辑，确保 goal_pos 是对的
+        # 为了简单，我们依赖外部 reset 调用 step 后自动更新，但在 reset 时必须清零 metrics
+        self.metrics["error_anchor_pos"][env_ids] = 0.0
+        self.metrics["error_anchor_rot"][env_ids] = 0.0
+        self.metrics["error_joint_pos"][env_ids] = 0.0
+        self.metrics["error_body_pos"][env_ids] = 0.0
+
 
 @configclass
 class MotionCommandCfg(CommandTermCfg):
@@ -442,6 +487,7 @@ class MotionCommandCfg(CommandTermCfg):
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
     enable_bin_adaptive_sampling: bool = True
+    enable_motion_adaptive_sampling: bool = True
     bin_count = 5
 
     adaptive_kernel_size: int = 1

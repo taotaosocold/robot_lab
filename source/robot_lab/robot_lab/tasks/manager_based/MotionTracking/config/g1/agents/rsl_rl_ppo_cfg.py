@@ -3,8 +3,8 @@
 
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
-from .Transformer_ActorCritic import TransformerEncoderDecoderActorCritic
 
+#-------------------------------module cfg------------------------------
 @configclass
 class MLPActorMLPCriticCfg:
     class_name: str = "__import__('robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.Transformer_ActorCritic', fromlist=['MLPActorMLPCritic']).MLPActorMLPCritic"
@@ -85,7 +85,8 @@ class MOEMLPTransformerEncoderActorMLPCriticCfg:
     num_encoder_layers: int = 1
     num_experts: int = 10
     dim_feedforward: int = 256
-    mlp_hidden_dims: list[int] = [512, 256, 128]
+    actor_mlp_hidden_dims: list[int] = [512, 256, 128]
+    critic_mlp_hidden_dims: list[int] = [512, 256, 128]
     activation: str = "elu"
     dropout: float = 0.1
     init_noise_std: float = 1.0
@@ -96,12 +97,16 @@ class MOEMLPTransformerEncoderActorCriticCfg:
     d_model: int = 256
     nhead: int = 4
     num_encoder_layers: int = 1
-    num_experts: int = 5
+    num_experts: int = 15
     dim_feedforward: int = 256
     mlp_hidden_dims: list[int] = [512, 256, 128]
     activation: str = "elu"
     dropout: float = 0.1
     init_noise_std: float = 1.0
+
+
+#-------------------------------algorithm cfg------------------------------
+
 
 @configclass
 class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
@@ -128,6 +133,3 @@ class UnitreeG1MotionTrackingFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
-    # eval
-    load_run = "2025-12-22_17-55-45"
-    load_checkpoint = "model_2300.pt"

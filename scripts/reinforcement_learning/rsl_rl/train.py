@@ -78,6 +78,7 @@ from datetime import datetime
 
 import omni
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+from robot_lab.tasks.manager_based.MotionTracking.config.g1.agents.on_policy_runner import OnPolicyRunner
 
 from isaaclab.envs import (
     DirectMARLEnv,
