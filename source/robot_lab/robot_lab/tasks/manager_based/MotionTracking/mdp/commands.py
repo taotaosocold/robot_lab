@@ -486,8 +486,8 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
-    enable_bin_adaptive_sampling: bool = True
-    enable_motion_adaptive_sampling: bool = True
+    enable_bin_adaptive_sampling: bool = False
+    enable_motion_adaptive_sampling: bool = False
     bin_count = 5
 
     adaptive_kernel_size: int = 1

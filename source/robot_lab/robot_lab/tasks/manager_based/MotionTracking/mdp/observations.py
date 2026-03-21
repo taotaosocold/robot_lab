@@ -10,6 +10,7 @@ from isaaclab.utils.math import (
     matrix_from_quat, 
     quat_conjugate,
     quat_apply,
+    quat_apply_inverse,
     quat_mul,
     euler_xyz_from_quat,
     quat_from_euler_xyz,
@@ -585,3 +586,9 @@ def robot_dynamic_friction_obs(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg) 
     materials = asset.root_physx_view.get_material_properties()
     dynamic_friction = materials[:, :, 1]
     return dynamic_friction
+
+def my_projected_gravity(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    robot_anchor_quat_w = command.robot_anchor_quat_w
+    gravity = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    return quat_apply_inverse(robot_anchor_quat_w, gravity)

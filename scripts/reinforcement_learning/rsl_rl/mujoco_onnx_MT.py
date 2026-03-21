@@ -8,7 +8,7 @@ import torch
 network_script_directory = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/agents"
 if network_script_directory not in sys.path:
     sys.path.append(network_script_directory)
-from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, MOEMLPTransformerEncoderActorMLPCritic
+from Transformer_ActorCritic import TransformerEncoderActorCritic, TransformerEncoderDecoderActorCritic, MOEMLPTransformerEncoderActorMLPCritic, MOEMLPTransformerEncoderActorCritic
 from tensordict import TensorDict
 import utils.math_utils as math_utils
 
@@ -119,10 +119,10 @@ class HumanoidEnv:
     def load_model(self):
         print(f"Loading ONNX policy from {self.policy_path}")
         # 基础参数依然需要，用于维度对齐
-        self.future_steps = 15
+        self.future_steps = 20
         self.history_length = 1
         self.num_actions = 23
-        self.policy_proprio_dim = 256 # 对应你之前的 46+3+3+3+6+42+84+3+23+23+23
+        self.policy_proprio_dim = 292 # 对应你之前的 46+3+3+3+6+42+84+3+23+23+23
         
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if self.device == "cuda" else ['CPUExecutionProvider']
         self.session = ort.InferenceSession(self.policy_path, providers=providers)
@@ -214,10 +214,10 @@ class HumanoidEnv:
         dof_vel = torch.from_numpy(self.data.qvel[-self.num_dofs:].astype(np.float32)).to(self.device)
         anchor_pos_w = torch.from_numpy(self.data.body('torso_link').xpos.astype(np.float32)).to(self.device)
         anchor_quat_w = torch.from_numpy(self.data.body('torso_link').xquat.astype(np.float32)).to(self.device)
-        base_lin_vel = torch.from_numpy(self.data.sensor('imu-torso-linear-velocity').data.astype(np.float32)).to(self.device)
-        base_ang_vel = torch.from_numpy(self.data.sensor('imu-torso-angular-velocity').data.astype(np.float32)).to(self.device)
-        # base_lin_vel = torch.from_numpy(self.data.qvel.astype(np.float32)[0:3]).to(self.device)
-        # base_ang_vel = torch.from_numpy(self.data.qvel.astype(np.float32)[3:6]).to(self.device)
+        # base_lin_vel = torch.from_numpy(self.data.sensor('imu-torso-linear-velocity').data.astype(np.float32)).to(self.device)
+        # base_ang_vel = torch.from_numpy(self.data.sensor('imu-torso-angular-velocity').data.astype(np.float32)).to(self.device)
+        base_lin_vel = torch.from_numpy(self.data.qvel.astype(np.float32)[0:3]).to(self.device)
+        base_ang_vel = torch.from_numpy(self.data.qvel.astype(np.float32)[3:6]).to(self.device)
 
         gravity_vec_w = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32)
         projected_gravity_b = math_utils.quat_apply_inverse(anchor_quat_w, gravity_vec_w)
@@ -234,28 +234,34 @@ class HumanoidEnv:
         # compute robot body pos\ori_r
         robot_body_pos_w = torch.from_numpy(self.data.xpos.astype(np.float32)).to(self.device)[self.robot_body_indexes]
         robot_body_quat_w = torch.from_numpy(self.data.xquat.astype(np.float32)).to(self.device)[self.robot_body_indexes]
+        robot_body_lin_vel_w = torch.from_numpy(self.data.cvel.astype(np.float32)).to(self.device)[self.robot_body_indexes, 3:]
+        robot_body_ang_vel_w = torch.from_numpy(self.data.cvel.astype(np.float32)).to(self.device)[self.robot_body_indexes, :3]
         diff_p = robot_body_pos_w - anchor_pos_w.view(1, 3)
         anchor_quat_inv = math_utils.quat_conjugate(anchor_quat_w).view(1, 4).expand(len(self.robot_body_indexes), 4)
         robot_body_pos_r = math_utils.quat_apply(anchor_quat_inv, diff_p).reshape(-1) # 14*3 = 42
         diff_q = math_utils.quat_mul(anchor_quat_inv, robot_body_quat_w)
         robot_body_ori_r = math_utils.matrix_from_quat(diff_q)[..., :2].reshape(-1) # 14*6 = 84
-
+        robot_body_lin_vel_r = math_utils.quat_apply(anchor_quat_inv, robot_body_lin_vel_w).reshape(-1)
+        robot_body_ang_vel_r = math_utils.quat_apply(anchor_quat_inv, robot_body_ang_vel_w).reshape(-1)
         dof_pos = (dof_pos - self.default_dof_pos)[self.mujoco2isaac_dof_index]
         dof_vel = (dof_vel - 0)[self.mujoco2isaac_dof_index]
-
         proprio_obs = torch.cat([
             command,
-            motion_anchor_pos_b,  # 3
+            # motion_anchor_pos_b,  # 3
             motion_anchor_ori_b,  # 6
-            base_lin_vel,          # 3
-            base_ang_vel,         # 3
             robot_body_pos_r,     # 42
             robot_body_ori_r,     # 84
+            # robot_body_lin_vel_r, # 42
+            # robot_body_ang_vel_r, # 42
             # projected_gravity_b,  # 3
+            base_lin_vel,          # 3
+            base_ang_vel,         # 3
             dof_pos,              # 23
             dof_vel,              # 23
             self.last_action,        # 23
         ], dim=-1)
+        # print(proprio_obs)
+        # return 
         return proprio_obs
         
     def run(self):
@@ -322,8 +328,8 @@ if __name__ == "__main__":
     parser.add_argument('--robot', type=str, default="g1")
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
-    checkpoint = "/home/ubuntu/Desktop/RoboJuDo/assets/models/g1/beyondmimic/MOETransformerActorMLPCritic_updown.onnx"
-    motion_file = "/home/ubuntu/Desktop/RoboJuDo/assets/motions/g1/beyondmimic/75_20_poses.npz"
+    checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-02-12_23-50-30_253/exported/MOEMLPTransformerActorCritic_253.onnx"
+    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/walk/105_17_stageii.npz"
     assert os.path.exists(checkpoint), f"Policy path {checkpoint} does not exist!"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"

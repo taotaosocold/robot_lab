@@ -105,7 +105,7 @@ def export_moe_model(checkpoint_path, save_dir):
     # future_steps = 15, history_length = 1
     # 请确保这里的维度与训练时的 obs_group 拼接后的维度完全一致
     FUTURE_DIM = 256  # 示例值，需根据 ObsTerm 实际输出维度计算
-    PROPRIO_DIM = 334 # 示例值
+    PROPRIO_DIM = 253 # 示例值
     NUM_ACTIONS = 23
     NUM_EXPERTS = 15   # 示例值
     
