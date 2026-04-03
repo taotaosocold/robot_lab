@@ -11,23 +11,31 @@ class UnitreeG1BeyondMimicFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 30000
     save_interval = 500
     experiment_name = "unitree_g1_beyondmimic_flat"
-    actor = RslRlMLPModelCfg(                                                                                                                                                                 
-        class_name="MLPModel",                                                                                                                                                                
-        hidden_dims=[512, 256, 128],                                                                                                                                                          
-        activation="elu",                                                                                                                                                                     
-        obs_normalization=False,                                                                                                                                                              
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),                                                                                                              
-    )                                                                                                                                                                                         
-    critic = RslRlMLPModelCfg(                                                                                                                                                                
-        class_name="MLPModel",                                                                                                                                                                
-        hidden_dims=[512, 256, 128],                                                                                                                                                          
-        activation="elu",                                                                                                                                                                     
-        obs_normalization=False,                                                                                                                                                              
-    )                                                                                                                                                                                         
-    obs_groups = {                                                                                                                                                                            
-        "actor": ["policy"],                                                                                                                                                                  
-        "critic": ["critic"],                                                                                                                                                                 
-    }    
+    # actor = RslRlMLPModelCfg(                                                                                                                                                                 
+    #     class_name="MLPModel",                                                                                                                                                                
+    #     hidden_dims=[512, 256, 128],                                                                                                                                                          
+    #     activation="elu",                                                                                                                                                                     
+    #     obs_normalization=False,                                                                                                                                                              
+    #     distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),                                                                                                              
+    # )                                                                                                                                                                                         
+    # critic = RslRlMLPModelCfg(                                                                                                                                                                
+    #     class_name="MLPModel",                                                                                                                                                                
+    #     hidden_dims=[512, 256, 128],                                                                                                                                                          
+    #     activation="elu",                                                                                                                                                                     
+    #     obs_normalization=False,                                                                                                                                                              
+    # )                                                                                                                                                                                         
+    # obs_groups = {                                                                                                                                                                            
+    #     "actor": ["policy"],                                                                                                                                                                  
+    #     "critic": ["critic"],                                                                                                                                                                 
+    # }
+    policy = RslRlPpoActorCriticCfg(
+        init_noise_std=1.0,
+        actor_obs_normalization=False,
+        critic_obs_normalization=False,
+        actor_hidden_dims=[512, 256, 128],
+        critic_hidden_dims=[512, 256, 128],
+        activation="elu",
+    )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
