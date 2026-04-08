@@ -2,15 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from isaaclab.utils import configclass
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg, RslRlMLPModelCfg
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
 
 @configclass
-class UnitreeG1BeyondMimicFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+class Casbot02AdaptiveMimicFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 30000
     save_interval = 500
-    experiment_name = "unitree_g1_beyondmimic_flat"
+    experiment_name = "casbot_02_adaptivemimic_flat"
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_obs_normalization=False,
