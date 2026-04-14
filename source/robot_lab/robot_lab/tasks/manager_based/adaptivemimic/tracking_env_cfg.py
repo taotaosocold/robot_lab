@@ -184,7 +184,7 @@ class EventCfg:
         func=mdp.randomize_rigid_body_com,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="wasit_yaw_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names="waist_yaw_link"),
             "com_range": {"x": (-0.025, 0.025), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
         },
     )
@@ -245,19 +245,19 @@ class RewardsCfg:
     )
 
     # Others
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-0.1,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=[
-                    r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
-                ],
-            ),
-            "threshold": 1.0,
-        },
-    )
+    # undesired_contacts = RewTerm(
+    #     func=mdp.undesired_contacts,
+    #     weight=-0.1,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg(
+    #             "contact_forces",
+    #             body_names=[
+    #                 r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
+    #             ],
+    #         ),
+    #         "threshold": 1.0,
+    #     },
+    # )
 
 
 @configclass

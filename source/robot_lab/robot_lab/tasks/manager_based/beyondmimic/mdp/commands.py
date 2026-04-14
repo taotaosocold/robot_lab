@@ -68,6 +68,8 @@ class MotionCommand(CommandTerm):
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
+        print("IsaacLab 中的所有 Body 名称 (self.robot.body_names):", self.robot.body_names)
+        print("IsaacLab中的所有关节名称:", self.robot.data.joint_names)
         self.robot_anchor_body_index = self.robot.body_names.index(self.cfg.anchor_body_name)
         self.motion_anchor_body_index = self.cfg.body_names.index(self.cfg.anchor_body_name)
         self.body_indexes = torch.tensor(

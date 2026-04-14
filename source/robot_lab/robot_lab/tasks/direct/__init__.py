@@ -9,3 +9,5 @@ Direct workflow environments.
 """
 
 import gymnasium as gym
+
+from . import casbot_skeleton_amp  # noqa: F401
