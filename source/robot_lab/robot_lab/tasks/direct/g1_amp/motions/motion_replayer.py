@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2026 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 # Copyright (c) 2025 Linden
@@ -41,7 +41,6 @@ app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import torch
-
 from motion_loader import MotionLoader
 
 import isaaclab.sim as sim_utils

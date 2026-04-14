@@ -1,7 +1,7 @@
-# Copyright (c) 2024-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BSD-3-Clause
 
 """This script sets up the vs-code settings for the Isaac Lab project.
 
@@ -49,11 +49,11 @@ except EOFError:
 # check if the isaac-sim directory exists
 if not os.path.exists(isaacsim_dir):
     raise FileNotFoundError(
-        f"Could not find the isaac-sim directory: {isaacsim_dir}. There are two possible reasons for this:"
-        "\n\t1. The Isaac Sim directory does not exist as provided CLI path."
-        "\n\t2. The script could import the 'isaacsim' package. This could be due to the 'isaacsim' package not being "
-        "installed in the Python environment.\n"
-        "\nPlease make sure that the Isaac Sim directory exists or that the 'isaacsim' package is installed."
+        f"Could not find the isaac-sim directory: {isaacsim_dir}. There are two possible reasons for this:\n\t1. The"
+        " Isaac Sim directory does not exist as provided CLI path.\n\t2. The script couldn't import the 'isaacsim'"
+        " package. This could be due to the 'isaacsim' package not being installed in the Python"
+        " environment.\n\nPlease make sure that the Isaac Sim directory exists or that the 'isaacsim' package is"
+        " installed."
     )
 
 ISAACSIM_DIR = isaacsim_dir

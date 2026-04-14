@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2026 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 """This script replay a motion from a csv file and output it to a npz file
@@ -12,6 +12,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+
 import numpy as np
 
 from isaaclab.app import AppLauncher
@@ -52,6 +53,11 @@ simulation_app = app_launcher.app
 
 import torch
 
+##
+# Pre-defined configs
+##
+from robot_lab.assets.unitree import UNITREE_G1_29DOF_CFG
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
@@ -59,11 +65,6 @@ from isaaclab.sim import SimulationContext
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, quat_slerp
-
-##
-# Pre-defined configs
-##
-from robot_lab.assets.unitree import UNITREE_G1_29DOF_CFG
 
 
 @configclass

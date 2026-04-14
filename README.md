@@ -1,7 +1,7 @@
 # robot_lab
 
 [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
-[![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.3.0-silver)](https://isaac-sim.github.io/IsaacLab)
+[![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.3.2-silver)](https://isaac-sim.github.io/IsaacLab)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://docs.python.org/3/whatsnew/3.11.html)
 [![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/22.04/)
 [![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
@@ -14,7 +14,7 @@
 
 The table below lists all available environments:
 
-| Category   | Robot Model         | Environment Name (ID)                                      | Screenshot |
+| Category   | Robot Model         | Environment Name (<ENV_NAME>)                                      | Screenshot |
 |------------|---------------------|------------------------------------------------------------|------------|
 | **Quadruped** | [Anymal D](https://www.anybotics.com/robotics/anymal) | RobotLab-Isaac-Velocity-Rough-Anymal-D-v0 | <img src="./docs/imgs/anymal_d.png" alt="anymal_d" width="75"> |
 |            | [Unitree Go2](https://www.unitree.com/go2) | RobotLab-Isaac-Velocity-Rough-Unitree-Go2-v0 | <img src="./docs/imgs/unitree_go2.png" alt="unitree_go2" width="75"> |
@@ -23,6 +23,7 @@ The table below lists all available environments:
 |            | [Deeprobotics Lite3](https://www.deeprobotics.cn/robot/index/product1.html) | RobotLab-Isaac-Velocity-Rough-Deeprobotics-Lite3-v0 | <img src="./docs/imgs/deeprobotics_lite3.png" alt="Lite3" width="75"> |
 |            | [Zsibot ZSL1](https://www.zsibot.com/zsl1) | RobotLab-Isaac-Velocity-Rough-Zsibot-ZSL1-v0 | <img src="./docs/imgs/zsibot_zsl1.png" alt="zsibot_zsl1" width="75"> |
 |            | [Magiclab MagicDog](https://www.magiclab.top/dog) | RobotLab-Isaac-Velocity-Rough-MagicLab-Dog-v0 | <img src="./docs/imgs/magiclab_magicdog.png" alt="magiclab_magicdog" width="75"> |
+|            | [Agibot D1](https://www.agibot.com/) | RobotLab-Isaac-Velocity-Rough-Agibot-D1-v0 | <img src="./docs/imgs/agibot_d1.png" alt="magiclab_magicdog" width="75">  |
 | **Wheeled** | [Unitree Go2W](https://www.unitree.com/go2-w) | RobotLab-Isaac-Velocity-Rough-Unitree-Go2W-v0 | <img src="./docs/imgs/unitree_go2w.png" alt="unitree_go2w" width="75"> |
 |            | [Unitree B2W](https://www.unitree.com/b2-w) | RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 | <img src="./docs/imgs/unitree_b2w.png" alt="unitree_b2w" width="75"> |
 |            | [Deeprobotics M20](https://www.deeprobotics.cn/robot/index/lynx.html) | RobotLab-Isaac-Velocity-Rough-Deeprobotics-M20-v0 | <img src="./docs/imgs/deeprobotics_m20.png" alt="deeprobotics_m20" width="75"> |
@@ -50,7 +51,7 @@ The table below lists all available environments:
 | robot_lab Version | Isaac Lab Version             | Isaac Sim Version         |
 |------------------ | ----------------------------- | ------------------------- |
 | `main` branch     | `main` branch                 | Isaac Sim 4.5 / 5.0 / 5.1 |
-| `v2.3.0`          | `v2.3.0`                      | Isaac Sim 4.5 / 5.0 / 5.1 |
+| `v2.3.2`          | `v2.3.2`                      | Isaac Sim 4.5 / 5.0 / 5.1 |
 | `v2.2.2`          | `v2.2.1`                      | Isaac Sim 4.5 / 5.0       |
 | `v2.1.1`          | `v2.1.1`                      | Isaac Sim 4.5             |
 | `v1.1`            | `v1.4.1`                      | Isaac Sim 4.2             |
@@ -198,20 +199,29 @@ RSL-RL:
 
 ```bash
 # Train
-python scripts/reinforcement_learning/rsl_rl/train.py --task=<ENV_NAME> --headless
+python scripts/reinforcement_learning/rsl_rl/train.py --task=<TASK_NAME> --headless
 
 # Play
-python scripts/reinforcement_learning/rsl_rl/play.py --task=<ENV_NAME>
+python scripts/reinforcement_learning/rsl_rl/play.py --task=<TASK_NAME>
 ```
 
 CusRL (**Experimental**):
 
 ```bash
 # Train
-python scripts/reinforcement_learning/cusrl/train.py --task=<ENV_NAME> --headless
+python scripts/reinforcement_learning/cusrl/train.py --task=<TASK_NAME> --headless
 
 # Play
-python scripts/reinforcement_learning/cusrl/play.py --task=<ENV_NAME>
+python scripts/reinforcement_learning/cusrl/play.py --task=<TASK_NAME>
+```
+
+Running a task with dummy agents (These include dummy agents that output zero or random agents. They are useful to ensure that the environments are configured correctly):
+
+```bash
+# Zero-action agent
+python scripts/tools/zero_agent.py --task=<TASK_NAME>
+# Random-action agent
+python scripts/tools/random_agent.py --task=<TASK_NAME>
 ```
 
 BeyondMimic for Unitree G1:
@@ -312,18 +322,18 @@ Others (**Experimental**)
 * Resume training from folder or checkpoint, add `--resume --load_run run_folder_name --checkpoint /PATH/TO/model.pt`
 * To train with multiple GPUs, use the following command, where --nproc_per_node represents the number of available GPUs:
     ```bash
-    python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 scripts/reinforcement_learning/rsl_rl/train.py --task=<ENV_NAME> --headless --distributed
+    python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 scripts/reinforcement_learning/rsl_rl/train.py --task=<TASK_NAME> --headless --distributed
     ```
 * To scale up training beyond multiple GPUs on a single machine, it is also possible to train across multiple nodes. To train across multiple nodes/machines, it is required to launch an individual process on each node.
 
     For the master node, use the following command, where --nproc_per_node represents the number of available GPUs, and --nnodes represents the number of nodes:
     ```bash
-    python -m torch.distributed.run --nproc_per_node=2 --nnodes=2 --node_rank=0 --rdzv_id=123 --rdzv_backend=c10d --rdzv_endpoint=localhost:5555 scripts/reinforcement_learning/rsl_rl/train.py --task=<ENV_NAME> --headless --distributed
+    python -m torch.distributed.run --nproc_per_node=2 --nnodes=2 --node_rank=0 --rdzv_id=123 --rdzv_backend=c10d --rdzv_endpoint=localhost:5555 scripts/reinforcement_learning/rsl_rl/train.py --task=<TASK_NAME> --headless --distributed
     ```
     Note that the port (`5555`) can be replaced with any other available port.
     For non-master nodes, use the following command, replacing `--node_rank` with the index of each machine:
     ```bash
-    python -m torch.distributed.run --nproc_per_node=2 --nnodes=2 --node_rank=1 --rdzv_id=123 --rdzv_backend=c10d --rdzv_endpoint=ip_of_master_machine:5555 scripts/reinforcement_learning/rsl_rl/train.py --task=<ENV_NAME> --headless --distributed
+    python -m torch.distributed.run --nproc_per_node=2 --nnodes=2 --node_rank=1 --rdzv_id=123 --rdzv_backend=c10d --rdzv_endpoint=ip_of_master_machine:5555 scripts/reinforcement_learning/rsl_rl/train.py --task=<TASK_NAME> --headless --distributed
     ```
 
 ## Add your own robot
