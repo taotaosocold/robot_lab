@@ -28,7 +28,7 @@ class HumanoidEnv:
         self.robot_body_indexes = torch.tensor([1, 3, 5, 7, 9, 11, 13, 14, 16, 18, 19, 21, 23, 24], device=self.device)
         self.anchor_index = 4
         if robot_type == "g1":
-            model_path = "/home/ubuntu/Desktop/hjq/assets/g1_23dof_rev_1_0.xml"
+            model_path = "/home/ubuntu/Desktop/hjq/assets/g1_23dof.xml"
             # 全是根据beyondmimic的配置而更改的参数
             self.stiffness = np.array([ 
                 40.179, 99.098, 40.179, 99.098, 28.501, 28.501,  # left leg
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
     checkpoint = "/home/ubuntu/Desktop/robot_lab/logs/rsl_rl/unitree_g1_MotionTracking_flat/2026-02-12_23-50-30_253/exported/MOEMLPTransformerActorCritic_253.onnx"
-    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/walk/105_17_stageii.npz"
+    motion_file = "/home/ubuntu/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/MotionTracking/config/g1/motion/up_down/113_08_poses.npz"
     assert os.path.exists(checkpoint), f"Policy path {checkpoint} does not exist!"
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
