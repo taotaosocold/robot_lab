@@ -18,8 +18,9 @@ class Casbot02AdaptiveMimicFlatEnvCfg(AdaptiveMimicEnvCfg):
 
         self.scene.robot = CASBOT_SKELETON_25DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.actions.joint_pos.scale = CASBOT_SKELETON_25DOF_ACTION_SCALE
-        self.commands.motion.motion_file = f"{os.path.dirname(__file__)}/motion/fallAndGetUp2_subject2.npz"
-        # self.commands.motion.motion_file = f"{os.path.dirname(__file__)}/motion/G1_gangnam_style_V01.bvh_60hz.npz"
+        # self.actions.joint_pos.scale = {".*": 0.25}
+        self.actions.joint_pos.offset = {".*": 0.0}
+        self.commands.motion.motion_file = f"{os.path.dirname(__file__)}/motion/fallAndGetUp2_subject2_clip2.npz"
         self.commands.motion.anchor_body_name = "waist_yaw_link"
         self.commands.motion.body_names = [
             "base_link",

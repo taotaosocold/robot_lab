@@ -272,8 +272,8 @@ if __name__ == "__main__":
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
 
-    checkpoint = "/home/casbot/Desktop/robot_lab/logs/rsl_rl/unitree_g1_beyondmimic_flat/2026-04-09_17-23-42/model_best_ep_len.pt"
-    motion_file = "/home/casbot/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/beyondmimic/config/g1/motion/G1_Take_102.bvh_60hz.npz"
+    checkpoint = "/home/casbot/Desktop/robot_lab/logs/rsl_rl/unitree_g1_beyondmimic_flat/2026-04-14_18-00-40/model_best_reward.pt"
+    motion_file = "/home/casbot/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/beyondmimic/config/g1/motion/fallAndGetUp2_subject2.npz"
 
     env = HumanoidEnv(
         policy_path=checkpoint,
