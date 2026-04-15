@@ -269,6 +269,12 @@ MotionTracking for Unitree G1
   python scripts/reinforcement_learning/rsl_rl/play_MT.py --task=RobotLab-Isaac-MotionTracking-Flat-Unitree-G1-v0 --num_envs 2
   ```
 
+FlowMatching for Unitree G1
+- Training and Evaluation
+  ```bash
+  # Train
+  python scripts/reinforcement_learning/rsl_rl/train.py --task=RobotLab-Isaac-FlowMatching-Flat-Unitree-G1-v0 --headless
+
 Others (**Experimental**)
 
 - Train AMP Dance for Unitree G1
