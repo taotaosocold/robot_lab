@@ -114,9 +114,9 @@ CASBOT_SKELETON_25DOF_CFG = ArticulationCfg(
             joint_names_expr=["waist_yaw_joint"],
             effort_limit_sim=60.0,
             velocity_limit_sim=14.0,
-            stiffness=_stiffness(ARMATURE_LEG_YAW),
-            damping=_damping(ARMATURE_LEG_YAW),
-            armature=ARMATURE_LEG_YAW,
+            stiffness=_stiffness(ARMATURE_LEG_PITCH),
+            damping=_damping(ARMATURE_LEG_PITCH),
+            armature=ARMATURE_LEG_PITCH,
         ),
         "arms": ImplicitActuatorCfg(
             joint_names_expr=[

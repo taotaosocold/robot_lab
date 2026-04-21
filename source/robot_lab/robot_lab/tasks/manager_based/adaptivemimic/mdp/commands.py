@@ -31,41 +31,74 @@ if TYPE_CHECKING:
 
 
 class MotionLoader:
-    def __init__(self, motion_file: str, body_indexes: Sequence[int], device: str = "cpu"):
-        assert os.path.isfile(motion_file), f"Invalid file path: {motion_file}"
-        data = np.load(motion_file)
-        self.fps = data["fps"]
-        self.joint_pos = torch.tensor(data["joint_pos"], dtype=torch.float32, device=device)
-        self.joint_vel = torch.tensor(data["joint_vel"], dtype=torch.float32, device=device)
-        self._body_pos_w = torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device)
-        self._body_quat_w = torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device)
-        self._body_lin_vel_w = torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device)
-        self._body_ang_vel_w = torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device)
-        self._body_indexes = body_indexes
-        self.time_step_total = self.joint_pos.shape[0]
+    def __init__(self, motion_folder, body_indexes: Sequence[int], device: str = "cpu"):
+        self.device = device
+        # assert os.path.isfile(motion_file), f"Invalid file path: {motion_file}"
+        self.motion_folders = [motion_folder] if isinstance(motion_folder, str) else list(motion_folder)
+        
+        self.body_indexes = body_indexes
+        
+        self.motion_files = []
+        for folder in self.motion_folders:
+            if not os.path.isdir(folder):
+                raise FileNotFoundError(f"Motion folder not found: {folder}")
+            for root, dirs, files in os.walk(folder):
+                for f in files:
+                    if f.endswith('.npz'):
+                        self.motion_files.append(os.path.join(root, f))
+        print(self.motion_files)
+        self.num_motions = len(self.motion_files)
+        self.load_motion()
 
-    @property
-    def body_pos_w(self) -> torch.Tensor:
-        return self._body_pos_w[:, self._body_indexes]
-
-    @property
-    def body_quat_w(self) -> torch.Tensor:
-        return self._body_quat_w[:, self._body_indexes]
-
-    @property
-    def body_lin_vel_w(self) -> torch.Tensor:
-        return self._body_lin_vel_w[:, self._body_indexes]
-
-    @property
-    def body_ang_vel_w(self) -> torch.Tensor:
-        return self._body_ang_vel_w[:, self._body_indexes]
+    def load_motion(self):
+        motion_fps = []
+        motion_name = []
+        motion_joint_pos = []
+        motion_joint_vel = []
+        motion_body_pos_w = []
+        motion_body_quat_w = []
+        motion_body_lin_vel_w = []
+        motion_body_ang_vel_w = []
+        motion_body_pos_r = []
+        motion_body_quat_r = []
+        motion_body_lin_vel_r = []
+        motion_body_ang_vel_r = []
+        motion_frames = []
+        for i, file_path in enumerate(self.motion_files):
+            data = np.load(file_path)
+            motion_fps.append(data["fps"])
+            motion_name.append(os.path.splitext(os.path.basename(file_path))[0])
+            motion_joint_pos.append(torch.tensor(data["joint_pos"], dtype=torch.float32, device=self.device))
+            motion_joint_vel.append(torch.tensor(data["joint_vel"], dtype=torch.float32, device=self.device))
+            motion_body_pos_w.append(torch.tensor(data["body_pos_w"], dtype=torch.float32, device=self.device))
+            motion_body_quat_w.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=self.device))
+            motion_body_lin_vel_w.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=self.device))
+            motion_body_ang_vel_w.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=self.device))
+            motion_body_pos_r.append(torch.tensor(data["body_pos_r"], dtype=torch.float32, device=self.device))
+            motion_body_quat_r.append(torch.tensor(data["body_quat_r"], dtype=torch.float32, device=self.device))
+            motion_body_lin_vel_r.append(torch.tensor(data["body_lin_vel_r"], dtype=torch.float32, device=self.device))
+            motion_body_ang_vel_r.append(torch.tensor(data["body_ang_vel_r"], dtype=torch.float32, device=self.device))
+            motion_frames.append(data["joint_pos"].shape[0])
+        
+        self.motion_name = motion_name
+        self.motion_joint_pos = torch.cat(motion_joint_pos, dim=0)  # [total_frames, 23]
+        self.motion_joint_vel = torch.cat(motion_joint_vel, dim=0)
+        self.motion_body_pos_w = torch.cat(motion_body_pos_w, dim=0)    # [total_frames, 27, 3]
+        self.motion_body_quat_w = torch.cat(motion_body_quat_w, dim=0)
+        self.motion_body_lin_vel_w = torch.cat(motion_body_lin_vel_w, dim=0)
+        self.motion_body_ang_vel_w = torch.cat(motion_body_ang_vel_w, dim=0)
+        self.motion_body_pos_r = torch.cat(motion_body_pos_r, dim=0)    # [total_frames, 27, 3]
+        self.motion_body_quat_r = torch.cat(motion_body_quat_r, dim=0)
+        self.motion_body_lin_vel_r = torch.cat(motion_body_lin_vel_r, dim=0)
+        self.motion_body_ang_vel_r = torch.cat(motion_body_ang_vel_r, dim=0)
+        self.motion_frames = torch.tensor(motion_frames, dtype=torch.long, device=self.device) #[20, 30...]
+        self.motion_start = torch.cat([torch.zeros(1, dtype=torch.long, device=self.device), self.motion_frames.cumsum(dim=0)[:-1]]) #[0, 20, 50...]
 
 
 class MotionCommand(CommandTerm):
     cfg: MotionCommandCfg
 
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv):
-        print("-" * 100)
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
@@ -77,15 +110,20 @@ class MotionCommand(CommandTerm):
             self.robot.find_bodies(self.cfg.body_names, preserve_order=True)[0], dtype=torch.long, device=self.device
         )
 
-        self.motion = MotionLoader(self.cfg.motion_file, self.body_indexes, device=self.device)
+        self.env_motion_idx = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.motion = MotionLoader(self.cfg.motion_folder, self.body_indexes, device=self.device)
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
         self.body_quat_relative_w[:, :, 0] = 1.0
-
-        self.bin_count = int(self.motion.time_step_total // (1 / (env.cfg.decimation * env.cfg.sim.dt))) + 1
-        self.bin_failed_count = torch.zeros(self.bin_count, dtype=torch.float, device=self.device)
-        self._current_bin_failed = torch.zeros(self.bin_count, dtype=torch.float, device=self.device)
+        self.body_lin_vel_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
+        self.body_ang_vel_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
+        self.motion_failed_count = torch.zeros(self.motion.num_motions, dtype=torch.float, device=self.device)
+        self._current_motion_failed = torch.zeros(self.motion.num_motions, dtype=torch.float, device=self.device)
+        # 直接每个运动序列分成的片段数量相同（舍弃每个运动序列动态片段）
+        self.bin_count = self.cfg.bin_count
+        self.bin_failed_count = torch.zeros(self.motion.num_motions, self.bin_count, dtype=torch.float, device=self.device)
+        self._current_bin_failed = torch.zeros_like(self.bin_failed_count)
         self.kernel = torch.tensor(
             [self.cfg.adaptive_lambda**i for i in range(self.cfg.adaptive_kernel_size)], device=self.device
         )
@@ -99,53 +137,64 @@ class MotionCommand(CommandTerm):
         self.metrics["error_body_rot"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_vel"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["sampling_entropy"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
+        # self.metrics["sampling_entropy"] = torch.zeros(self.num_envs, device=self.device)
+        # self.metrics["sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
+        # self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
 
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
 
     @property
+    def current_frame(self) -> torch.Tensor:
+        return self.motion.motion_start[self.env_motion_idx] + self.time_steps
+
+    @property
+    def motion_type_id(self) -> torch.Tensor:
+        return self.motion.motion_type_ids[self.env_motion_idx]
+
+    def motion_type_name(self, name: str) -> int:
+        return self.motion.unique_types.index(name)
+
+    @property
     def joint_pos(self) -> torch.Tensor:
-        return self.motion.joint_pos[self.time_steps]
+        return self.motion.motion_joint_pos[self.current_frame]
 
     @property
     def joint_vel(self) -> torch.Tensor:
-        return self.motion.joint_vel[self.time_steps]
+        return self.motion.motion_joint_vel[self.current_frame]
 
     @property
     def body_pos_w(self) -> torch.Tensor:
-        return self.motion.body_pos_w[self.time_steps] + self._env.scene.env_origins[:, None, :]
+        return self.motion.motion_body_pos_w[self.current_frame][:, self.body_indexes] + self._env.scene.env_origins[:, None, :]
 
     @property
     def body_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[self.time_steps]
+        return self.motion.motion_body_quat_w[self.current_frame][:, self.body_indexes]
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.body_lin_vel_w[self.time_steps]
+        return self.motion.motion_body_lin_vel_w[self.current_frame][:, self.body_indexes]
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.body_ang_vel_w[self.time_steps]
+        return self.motion.motion_body_ang_vel_w[self.current_frame][:, self.body_indexes]
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
-        return self.motion.body_pos_w[self.time_steps, self.motion_anchor_body_index] + self._env.scene.env_origins
+        return self.motion.motion_body_pos_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index] + self._env.scene.env_origins
 
     @property
     def anchor_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[self.time_steps, self.motion_anchor_body_index]
+        return self.motion.motion_body_quat_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index]
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.body_lin_vel_w[self.time_steps, self.motion_anchor_body_index]
+        return self.motion.motion_body_lin_vel_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index]
 
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.body_ang_vel_w[self.time_steps, self.motion_anchor_body_index]
+        return self.motion.motion_body_ang_vel_w[self.current_frame][:, self.body_indexes][:, self.motion_anchor_body_index]
 
     @property
     def robot_joint_pos(self) -> torch.Tensor:
@@ -212,39 +261,61 @@ class MotionCommand(CommandTerm):
 
     def _adaptive_sampling(self, env_ids: Sequence[int]):
         episode_failed = self._env.termination_manager.terminated[env_ids]
+        # adaptive sampling motion
         if torch.any(episode_failed):
-            current_bin_index = torch.clamp(
-                (self.time_steps * self.bin_count) // max(self.motion.time_step_total, 1), 0, self.bin_count - 1
+            fail_motion = self.env_motion_idx[env_ids][episode_failed]
+            self._current_motion_failed[:] = torch.bincount(fail_motion, minlength=self.motion.num_motions)
+        
+        if self.cfg.enable_motion_adaptive_sampling:
+            motion_sampling_probabilities = self.motion_failed_count + self.cfg.motion_adaptive_uniform_ratio / float(self.motion.num_motions)
+            motion_sampling_probabilities = motion_sampling_probabilities / motion_sampling_probabilities.sum()
+            sampled_motion = torch.multinomial(motion_sampling_probabilities, len(env_ids), replacement=True)
+        else:
+            sampled_motion =  torch.randint(0, self.motion.num_motions, (len(env_ids),), device=self.device)
+
+        # adaptive sampling clip
+        if self.cfg.enable_bin_adaptive_sampling:
+            if torch.any(episode_failed):
+                current_bin_index = torch.clamp(
+                    (self.time_steps * self.bin_count) // self.motion.motion_frames[self.env_motion_idx], 0, self.bin_count - 1
+                )       # [num_envs]
+                fail_bins = current_bin_index[env_ids][episode_failed]
+                self._current_bin_failed[self.env_motion_idx[env_ids][episode_failed], fail_bins] += 1.0
+
+            self.env_motion_idx[env_ids] = sampled_motion
+
+            bin_sampling_probabilities = self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(self.bin_count)    #[num_motions, bin_count]
+            bin_sampling_probabilities = torch.nn.functional.pad(
+                bin_sampling_probabilities.unsqueeze(1),
+                (0, self.cfg.adaptive_kernel_size - 1),  # Non-causal kernel
+                mode="replicate",
             )
-            fail_bins = current_bin_index[env_ids][episode_failed]
-            self._current_bin_failed[:] = torch.bincount(fail_bins, minlength=self.bin_count)
+            bin_sampling_probabilities = torch.nn.functional.conv1d(bin_sampling_probabilities, self.kernel.view(1, 1, -1)).squeeze(1)  # [num_motions, bin_count]
 
-        # Sample
-        sampling_probabilities = self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(self.bin_count)
-        sampling_probabilities = torch.nn.functional.pad(
-            sampling_probabilities.unsqueeze(0).unsqueeze(0),
-            (0, self.cfg.adaptive_kernel_size - 1),  # Non-causal kernel
-            mode="replicate",
-        )
-        sampling_probabilities = torch.nn.functional.conv1d(sampling_probabilities, self.kernel.view(1, 1, -1)).view(-1)
+            bin_sampling_probabilities = bin_sampling_probabilities / bin_sampling_probabilities.sum(dim=1, keepdim=True)   # [num_motions, bin_count]
 
-        sampling_probabilities = sampling_probabilities / sampling_probabilities.sum()
+            sampled_bins = torch.multinomial(bin_sampling_probabilities[sampled_motion], 1, replacement=True).squeeze(-1)    # [len(env_ids)]
 
-        sampled_bins = torch.multinomial(sampling_probabilities, len(env_ids), replacement=True)
+            motion_lengths = self.motion.motion_frames[self.env_motion_idx[env_ids]]
+            start_frames = self.motion.motion_start[self.env_motion_idx[env_ids]]
 
-        self.time_steps[env_ids] = (
-            (sampled_bins + sample_uniform(0.0, 1.0, (len(env_ids),), device=self.device))
-            / self.bin_count
-            * (self.motion.time_step_total - 1)
-        ).long()
+            self.time_steps[env_ids] = (
+                (sampled_bins.float() / self.bin_count * motion_lengths).long() + 
+                (torch.rand(len(env_ids), device=self.device) * (motion_lengths / self.bin_count).long().clamp(min=1)).long()
+            ).long()
 
-        # Metrics
-        H = -(sampling_probabilities * (sampling_probabilities + 1e-12).log()).sum()
-        H_norm = H / math.log(self.bin_count)
-        pmax, imax = sampling_probabilities.max(dim=0)
-        self.metrics["sampling_entropy"][:] = H_norm
-        self.metrics["sampling_top1_prob"][:] = pmax
-        self.metrics["sampling_top1_bin"][:] = imax.float() / self.bin_count
+            # Metrics
+            H = -(bin_sampling_probabilities * (bin_sampling_probabilities + 1e-12).log()).sum()
+            H_norm = H / math.log(self.bin_count)
+            pmax, imax = bin_sampling_probabilities.max(dim=0)
+            # self.metrics["bin_sampling_entropy"][:] = H_norm[self.env_motion_idx]
+            # self.metrics["bin_sampling_top1_prob"][:] = pmax
+            # self.metrics["bin_sampling_top1_bin"][:] = imax.float() / self.bin_count
+        else:
+            self.env_motion_idx[env_ids] = sampled_motion
+            # self.time_steps[env_ids] = 0
+            motion_lengths = self.motion.motion_frames[sampled_motion]
+            self.time_steps[env_ids] = (torch.rand(len(env_ids), device=self.device) * motion_lengths).long()
 
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
@@ -284,7 +355,7 @@ class MotionCommand(CommandTerm):
 
     def _update_command(self):
         self.time_steps += 1
-        env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+        env_ids = torch.where(self.time_steps >= self.motion.motion_frames[self.env_motion_idx])[0]
         self._resample_command(env_ids)
 
         anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
@@ -298,11 +369,38 @@ class MotionCommand(CommandTerm):
 
         self.body_quat_relative_w = quat_mul(delta_ori_w, self.body_quat_w)
         self.body_pos_relative_w = delta_pos_w + quat_apply(delta_ori_w, self.body_pos_w - anchor_pos_w_repeat)
-
+        self.body_lin_vel_relative_w = quat_apply(delta_ori_w, self.body_lin_vel_w)
+        self.body_ang_vel_relative_w = quat_apply(delta_ori_w, self.body_ang_vel_w)
+        # update motion and bin
+        self.motion_failed_count = (
+            self.cfg.adaptive_alpha * self._current_motion_failed +
+            (1 - self.cfg.adaptive_alpha) * self.motion_failed_count
+        )
         self.bin_failed_count = (
             self.cfg.adaptive_alpha * self._current_bin_failed + (1 - self.cfg.adaptive_alpha) * self.bin_failed_count
         )
+        self._print_motion_stats()
+        self._current_motion_failed.zero_()
         self._current_bin_failed.zero_()
+
+    def _print_motion_stats(self):
+        print_interval = 24 * 5
+        
+        if self._env.common_step_counter % print_interval == 0:
+            k = min(10, self.motion.num_motions)
+            top_vals, top_idxs = torch.topk(self.motion_failed_count, k=k)
+            print(f"\n" + "-" * 60)
+            print(f"统计时刻 (Total Steps): {self._env.common_step_counter}")
+            print(f"当前最难训练的 Top {k} 运动序列排行：")
+            print("-" * 60)
+            print(f"{'排名':<4} | {'运动序列名称':<35} | {'失败得分 (EMA)':<10}")
+            print("-" * 60)
+            for i in range(k):
+                name = self.motion.motion_name[top_idxs[i].item()]
+                score = top_vals[i].item()
+                print(f"{i+1:<6} | {name:<35} | {score:<10.4f}")
+            
+            print("-" * 60 + "\n")
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
@@ -362,7 +460,7 @@ class MotionCommandCfg(CommandTermCfg):
 
     asset_name: str = MISSING
 
-    motion_file: str = MISSING
+    motion_folder: str = MISSING
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
 
@@ -370,11 +468,15 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
+    enable_bin_adaptive_sampling: bool = True
+    enable_motion_adaptive_sampling: bool = True
+    bin_count = 5
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8
     adaptive_uniform_ratio: float = 0.1
     adaptive_alpha: float = 0.001
+    motion_adaptive_uniform_ratio: float = 0.1
 
     anchor_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/pose")
     anchor_visualizer_cfg.markers["frame"].scale = (0.2, 0.2, 0.2)

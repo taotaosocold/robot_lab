@@ -32,30 +32,27 @@ class HumanoidEnv:
 
         if robot_type == "casbot":
             model_path = "/home/casbot/Desktop/hjq/assets/casbot_skeleton/casbot_skeleton_25dof.xml"
-            # stiffness = armature * (10*2π)^2, per casbot_skeleton.py
-            # head_yaw / head_pitch are NOT covered by any ImplicitActuatorCfg in training → stiffness=0, damping=0
             self.stiffness = np.array([
                 276.311, 276.311, 156.310, 276.311, 156.310, 156.310,  # left leg:  pelvic_pitch, pelvic_roll, pelvic_yaw, knee_pitch, ankle_pitch, ankle_roll
                 276.311, 276.311, 156.310, 276.311, 156.310, 156.310,  # right leg: pelvic_pitch, pelvic_roll, pelvic_yaw, knee_pitch, ankle_pitch, ankle_roll
-                156.310,   0.000,   0.000,                              # waist_yaw, head_yaw, head_pitch (head: no actuator in training → 0)
+                276.311, 0.000,   0.000,                              # waist_yaw, head_yaw, head_pitch (head: no actuator in training → 0)
                 130.201, 130.201,  96.825, 130.201,  96.825,           # left arm:  sh_pitch, sh_roll, sh_yaw, elbow, wrist_yaw
                 130.201, 130.201,  96.825, 130.201,  96.825,           # right arm: sh_pitch, sh_roll, sh_yaw, elbow, wrist_yaw
             ])
-            # damping = 2 * 2.0 * armature * (10*2π), per casbot_skeleton.py
             self.damping = np.array([
                 17.591, 17.591,  9.951, 17.591,  9.951,  9.951,
                 17.591, 17.591,  9.951, 17.591,  9.951,  9.951,
-                 9.951,  0.000,  0.000,
-                 8.289,  8.289,  6.164,  8.289,  6.164,
-                 8.289,  8.289,  6.164,  8.289,  6.164,
+                17.591,  0.000,  0.000,
+                8.289,  8.289,  6.164,  8.289,  6.164,
+                8.289,  8.289,  6.164,  8.289,  6.164,
             ])
             # effort_limit_sim from casbot_skeleton.py
             self.torque_limits = np.array([
                 150.0, 150.0,  60.0, 150.0,  60.0,  60.0,
                 150.0, 150.0,  60.0, 150.0,  60.0,  60.0,
-                 60.0,   0.0,   0.0,
-                 75.0,  75.0,  36.0,  75.0,  36.0,
-                 75.0,  75.0,  36.0,  75.0,  36.0,
+                60.0,   0.0,   0.0,
+                75.0,  75.0,  36.0,  75.0,  36.0,
+                75.0,  75.0,  36.0,  75.0,  36.0,
             ])
             # init_state.joint_pos from casbot_skeleton.py
             self.default_dof_pos = torch.tensor([
@@ -66,14 +63,20 @@ class HumanoidEnv:
                  0.0,  0.0, 0.0, -0.5, 0.0,
             ], device=self.device, dtype=torch.float32)
 
-            # action_scale = 0.25 * effort / stiffness, per casbot_skeleton.py CASBOT_SKELETON_25DOF_ACTION_SCALE
-            # head joints have stiffness=0 in training (no actuator), scale is set to 0 to disable any effect
             self.action_scale = torch.tensor([
                 0.1357, 0.1357, 0.0960, 0.1357, 0.0960, 0.0960,
                 0.1357, 0.1357, 0.0960, 0.1357, 0.0960, 0.0960,
-                0.0960, 0.0000, 0.0000,
+                0.1357, 0.0000, 0.0000,
                 0.1440, 0.1440, 0.0930, 0.1440, 0.0930,
                 0.1440, 0.1440, 0.0930, 0.1440, 0.0930,
+            ], device=self.device, dtype=torch.float32)
+
+            self.residual_action_scale = torch.tensor([
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
             ], device=self.device, dtype=torch.float32)
 
             self.num_actions = 25
@@ -235,9 +238,9 @@ class HumanoidEnv:
 
                 scaled_action = action * self.action_scale[self.mujoco2isaac_dof_index] + self.default_dof_pos[self.mujoco2isaac_dof_index]
                 target_idx = min(curr_timestep, self.motion_len - 1)
-                residual_scaled_action = action * self.action_scale[self.mujoco2isaac_dof_index] + self.joint_pos[target_idx]
-                # pd_target = scaled_action[self.isaac2mujoco_dof_index].cpu().numpy()
-                pd_target = residual_scaled_action[self.isaac2mujoco_dof_index].cpu().numpy()
+                residual_scaled_action = action * self.residual_action_scale[self.mujoco2isaac_dof_index] + self.joint_pos[target_idx]
+                pd_target = scaled_action[self.isaac2mujoco_dof_index].cpu().numpy()
+                # pd_target = residual_scaled_action[self.isaac2mujoco_dof_index].cpu().numpy()
 
                 self.viewer.cam.lookat = self.data.qpos.astype(np.float32)[:3]
                 if self.record_video:
@@ -266,8 +269,8 @@ if __name__ == "__main__":
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
 
-    checkpoint = "/home/casbot/Desktop/robot_lab/logs/rsl_rl/casbot_02_adaptivemimic_flat/2026-04-15_11-29-55/model_best_ep_len.pt"
-    motion_file = "/home/casbot/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/adaptivemimic/config/casbot/motion/fallAndGetUp2_subject2_clip2.npz"
+    checkpoint = "/home/casbot/Desktop/robot_lab/logs/rsl_rl/casbot_02_adaptivemimic_flat/2026-04-21_13-09-29/model_best_ep_len.pt"
+    motion_file = "/home/casbot/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/adaptivemimic/config/casbot/motion/jump/02_04_poses.npz"
 
     env = HumanoidEnv(
         policy_path=checkpoint,

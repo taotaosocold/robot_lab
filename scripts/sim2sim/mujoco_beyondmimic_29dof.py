@@ -21,7 +21,7 @@ class HumanoidEnv:
 
         self.load_motion()
 
-        self.anchor_index = 1
+        self.anchor_index = 10
         self.anchor_name = "torso_link"
 
         self.mujoco2isaac_dof_index = torch.tensor([0, 6, 12, 1, 7, 13, 2, 8, 14, 3, 9, 15, 22,4, 10, 16, 23, 5, 11, 17, 24, 18, 25, 19, 26,20, 27, 21, 28,], device=self.device)
@@ -201,7 +201,8 @@ class HumanoidEnv:
                                          self.body_quat_w[target_idx, self.anchor_index])
         motion_anchor_ori_b = math_utils.matrix_from_quat(rel_quat_b)[..., :2].reshape(-1)
 
-        joint_pos = (dof_pos - self.default_dof_pos)[self.mujoco2isaac_dof_index]
+        # joint_pos = (dof_pos - self.default_dof_pos)[self.mujoco2isaac_dof_index]
+        joint_pos = dof_pos[self.mujoco2isaac_dof_index]
         joint_vel = dof_vel[self.mujoco2isaac_dof_index]
 
         obs_vec = torch.cat([
@@ -241,9 +242,9 @@ class HumanoidEnv:
 
                 scaled_action = action * self.action_scale[self.mujoco2isaac_dof_index] + self.default_dof_pos[self.mujoco2isaac_dof_index]
                 target_idx = min(curr_timestep, self.motion_len - 1)
-                # residual_scaled_action = action * self.action_residual_scale[self.mujoco2isaac_dof_index] + self.joint_pos[target_idx]
+                residual_scaled_action = action * self.action_residual_scale[self.mujoco2isaac_dof_index] + self.joint_pos[target_idx]
                 pd_target = scaled_action[self.isaac2mujoco_dof_index].cpu().numpy()
-                # pd_target = residual_scaled_action[self.isaac2mujoco_dof_index].cpu().numpy()
+                pd_target = residual_scaled_action[self.isaac2mujoco_dof_index].cpu().numpy()
 
                 self.viewer.cam.lookat = self.data.qpos.astype(np.float32)[:3]
                 if self.record_video:
@@ -272,8 +273,8 @@ if __name__ == "__main__":
     parser.add_argument('--record_video', action='store_true')
     args = parser.parse_args()
 
-    checkpoint = "/home/casbot/Desktop/robot_lab/logs/rsl_rl/unitree_g1_beyondmimic_flat/2026-04-14_18-00-40/model_best_reward.pt"
-    motion_file = "/home/casbot/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/beyondmimic/config/g1/motion/fallAndGetUp2_subject2.npz"
+    checkpoint = "/home/casbot/Desktop/robot_lab/logs/rsl_rl/unitree_g1_beyondmimic_flat/2026-04-16_15-18-31/model_1000.pt"
+    motion_file = "/home/casbot/Desktop/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/beyondmimic/config/g1/motion/G1_Take_102.bvh_60hz.npz"
 
     env = HumanoidEnv(
         policy_path=checkpoint,

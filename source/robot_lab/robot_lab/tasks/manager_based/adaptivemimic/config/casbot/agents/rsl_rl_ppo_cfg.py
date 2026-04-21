@@ -8,8 +8,8 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlMLPModelCfg, RslRlPp
 @configclass
 class Casbot02AdaptiveMimicFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 30000
-    save_interval = 500
+    max_iterations = 100000
+    save_interval = 1000
     experiment_name = "casbot_02_adaptivemimic_flat"
     actor = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
